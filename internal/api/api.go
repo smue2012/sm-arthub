@@ -31,9 +31,9 @@ const (
 
 // Katalog: was die API vom Katalog braucht (im Test eine Attrappe).
 type Katalog interface {
-	Seit(ctx context.Context, seit int64, limit int) ([]katalog.Artikel, bool, error)
-	Nummer(ctx context.Context, nummer string) (katalog.Artikel, error)
-	Suche(ctx context.Context, q string, limit int, nurVerfuegbar bool) ([]katalog.Artikel, bool, error)
+	Seit(ctx context.Context, app string, seit int64, limit int) ([]katalog.Artikel, bool, error)
+	Nummer(ctx context.Context, app, nummer string) (katalog.Artikel, error)
+	Suche(ctx context.Context, app, q string, limit int, nurVerfuegbar bool) ([]katalog.Artikel, bool, error)
 	Lieferanten(ctx context.Context) ([]katalog.Lieferant, error)
 }
 
@@ -139,7 +139,7 @@ func (h handler) artikelSeit(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = v
 	}
-	liste, mehr, err := h.k.Seit(r.Context(), seit, limit)
+	liste, mehr, err := h.k.Seit(r.Context(), App(r.Context()), seit, limit)
 	if err != nil {
 		h.serverfehler(w, r, err)
 		return
@@ -158,7 +158,7 @@ func (h handler) artikel(w http.ResponseWriter, r *http.Request) {
 	if !nurParameter(w, r) {
 		return
 	}
-	a, err := h.k.Nummer(r.Context(), r.PathValue("nummer"))
+	a, err := h.k.Nummer(r.Context(), App(r.Context()), r.PathValue("nummer"))
 	if errors.Is(err, katalog.ErrNichtGefunden) {
 		fehler(w, http.StatusNotFound, "Artikel nicht gefunden")
 		return
@@ -208,7 +208,7 @@ func (h handler) suche(w http.ResponseWriter, r *http.Request) {
 		fehler(w, http.StatusBadRequest, "verfuegbar: 0 oder 1")
 		return
 	}
-	liste, mehr, err := h.k.Suche(r.Context(), text, limit, nurVerfuegbar)
+	liste, mehr, err := h.k.Suche(r.Context(), App(r.Context()), text, limit, nurVerfuegbar)
 	if err != nil {
 		h.serverfehler(w, r, err)
 		return

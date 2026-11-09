@@ -47,6 +47,8 @@ type Artikel struct {
 	HerstellerNr string    `json:"hersteller_nr"`
 	EAN          string    `json:"ean"`
 	Kategorie    string    `json:"kategorie"`
+	Kategorie2   string    `json:"kategorie2"`
+	Kategorie3   string    `json:"kategorie3"`
 	GewichtG     *int      `json:"gewicht_g"`
 	LaengeMM     *int      `json:"laenge_mm"`
 	BreiteMM     *int      `json:"breite_mm"`
@@ -73,24 +75,28 @@ type Repository struct {
 }
 
 const artikelSpalten = `id, nummer, art, bezeichnung, beschreibung, hersteller, hersteller_nr,
-	ean, kategorie, gewicht_g, laenge_mm, breite_mm, hoehe_mm, aktiv, stand, geaendert`
+	ean, kategorie, kategorie2, kategorie3, gewicht_g, laenge_mm, breite_mm, hoehe_mm, aktiv, stand, geaendert`
 
 const artikelSpaltenA = `a.id, a.nummer, a.art, a.bezeichnung, a.beschreibung, a.hersteller, a.hersteller_nr,
-	a.ean, a.kategorie, a.gewicht_g, a.laenge_mm, a.breite_mm, a.hoehe_mm, a.aktiv, a.stand, a.geaendert`
+	a.ean, a.kategorie, a.kategorie2, a.kategorie3, a.gewicht_g, a.laenge_mm, a.breite_mm, a.hoehe_mm, a.aktiv, a.stand, a.geaendert`
 
 func scanArtikel(s interface{ Scan(...any) error }) (Artikel, error) {
 	var a Artikel
 	err := s.Scan(&a.id, &a.Nummer, &a.Art, &a.Bezeichnung, &a.Beschreibung, &a.Hersteller,
-		&a.HerstellerNr, &a.EAN, &a.Kategorie, &a.GewichtG, &a.LaengeMM, &a.BreiteMM, &a.HoeheMM,
+		&a.HerstellerNr, &a.EAN, &a.Kategorie, &a.Kategorie2, &a.Kategorie3, &a.GewichtG, &a.LaengeMM, &a.BreiteMM, &a.HoeheMM,
 		&a.Aktiv, &a.Stand, &a.Geaendert)
 	return a, err
 }
 
 // Seit liefert bis zu limit Artikel mit stand > seit (auch inaktive), aufsteigend
 // nach Stand. mehr = es gibt weitere; dann mit dem Stand des letzten weiterfragen.
-func (r Repository) Seit(ctx context.Context, seit int64, limit int) (liste []Artikel, mehr bool, err error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT `+artikelSpalten+` FROM artikel
-		WHERE stand > $1 ORDER BY stand LIMIT $2`, seit, limit+1)
+//
+// app: Name des API-Schlüssels; hat die App «nur Auswahl», kommen nur Artikel
+// ihrer Auswahl. (Ändert sich die Auswahl, erhalten die Artikel keinen neuen
+// Stand – für einen vollständigen Abgleich nach einer Änderung mit seit=0 holen.)
+func (r Repository) Seit(ctx context.Context, app string, seit int64, limit int) (liste []Artikel, mehr bool, err error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT `+artikelSpaltenA+` FROM artikel a
+		WHERE a.stand > $1 AND `+AuswahlBedingung(3)+` ORDER BY a.stand LIMIT $2`, seit, limit+1, app)
 	if err != nil {
 		return nil, false, err
 	}
@@ -114,10 +120,10 @@ func (r Repository) Seit(ctx context.Context, seit int64, limit int) (liste []Ar
 	return liste, mehr, nil
 }
 
-// Nummer liefert einen Artikel über seine Hub-Nummer.
-func (r Repository) Nummer(ctx context.Context, nummer string) (Artikel, error) {
+// Nummer liefert einen Artikel über seine Hub-Nummer (nur aus der Auswahl der App).
+func (r Repository) Nummer(ctx context.Context, app, nummer string) (Artikel, error) {
 	a, err := scanArtikel(r.DB.QueryRowContext(ctx,
-		`SELECT `+artikelSpalten+` FROM artikel WHERE nummer = $1`, nummer))
+		`SELECT `+artikelSpaltenA+` FROM artikel a WHERE a.nummer = $1 AND `+AuswahlBedingung(2), nummer, app))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Artikel{}, ErrNichtGefunden
 	}
@@ -134,7 +140,7 @@ func (r Repository) Nummer(ctx context.Context, nummer string) (Artikel, error) 
 // Suche findet aktive Artikel, in denen jedes Wort von q vorkommt (Bezeichnung,
 // Hersteller, Herstellernummer, EAN, Hub-Nummer oder Lieferanten-Artikelnummer). nurVerfuegbar: nur Artikel mit einem Angebot an
 // Lager. Sortiert nach Bezeichnung; mehr = es gäbe weitere Treffer.
-func (r Repository) Suche(ctx context.Context, q string, limit int, nurVerfuegbar bool) (liste []Artikel, mehr bool, err error) {
+func (r Repository) Suche(ctx context.Context, app, q string, limit int, nurVerfuegbar bool) (liste []Artikel, mehr bool, err error) {
 	woerter := strings.Fields(q)
 	if len(woerter) == 0 {
 		return []Artikel{}, false, nil
@@ -153,6 +159,8 @@ func (r Repository) Suche(ctx context.Context, q string, limit int, nurVerfuegba
 		bed = append(bed, `EXISTS (SELECT 1 FROM angebote v JOIN lieferanten vl ON vl.id = v.lieferant_id AND vl.aktiv
 			WHERE v.artikel_id = a.id AND v.aktiv AND v.lagerbestand > 0)`)
 	}
+	args = append(args, app)
+	bed = append(bed, AuswahlBedingung(len(args)))
 	args = append(args, limit+1)
 	rows, err := r.DB.QueryContext(ctx, `SELECT `+artikelSpaltenA+` FROM artikel a
 		JOIN artikel_suche s ON s.artikel_id = a.id

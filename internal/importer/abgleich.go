@@ -40,7 +40,8 @@ type Bericht struct {
 	StammdatenGeaendert int      `json:"stammdaten_geaendert"`
 	Deaktiviert         int      `json:"deaktiviert"`
 	BilderGeaendert     int      `json:"bilder_geaendert"`
-	EANMehrdeutig       int      `json:"ean_mehrdeutig"` // EAN gehört mehreren Artikeln – nicht darüber zugeordnet
+	Unbekannt           int      `json:"unbekannt,omitempty"` // Bestandsliste: Nummern ohne Angebot
+	EANMehrdeutig       int      `json:"ean_mehrdeutig"`      // EAN gehört mehreren Artikeln – nicht darüber zugeordnet
 	Sekunden            float64  `json:"sekunden"`
 	Hinweise            []string `json:"hinweise,omitempty"`
 }
@@ -84,7 +85,8 @@ func AbgleichenMitProtokoll(ctx context.Context, db *sql.DB, lieferantID int, la
 		`SET LOCAL arthub.massenimport = '1'`,
 		`CREATE TEMP TABLE imp (
 			lieferanten_nr TEXT PRIMARY KEY, bezeichnung TEXT, beschreibung TEXT, hersteller TEXT,
-			hersteller_nr TEXT, ean TEXT, kategorie TEXT, gewicht_g INTEGER, ek NUMERIC(12,4),
+			hersteller_nr TEXT, ean TEXT, kategorie TEXT, kategorie2 TEXT, kategorie3 TEXT,
+			gewicht_g INTEGER, ek NUMERIC(12,4),
 			lagerbestand INTEGER, lieferfrist_tage INTEGER, bild_urls TEXT[],
 			artikel_id BIGINT, neu BOOLEAN NOT NULL DEFAULT false) ON COMMIT DROP`,
 		`CREATE TEMP TABLE betroffen (artikel_id BIGINT) ON COMMIT DROP`,
@@ -97,7 +99,8 @@ func AbgleichenMitProtokoll(ctx context.Context, db *sql.DB, lieferantID int, la
 	}
 
 	copy, err := tx.PrepareContext(ctx, pq.CopyIn("imp", "lieferanten_nr", "bezeichnung", "beschreibung",
-		"hersteller", "hersteller_nr", "ean", "kategorie", "gewicht_g", "ek", "lagerbestand", "lieferfrist_tage", "bild_urls"))
+		"hersteller", "hersteller_nr", "ean", "kategorie", "kategorie2", "kategorie3", "gewicht_g", "ek", "lagerbestand",
+		"lieferfrist_tage", "bild_urls"))
 	if err != nil {
 		return b, err
 	}
@@ -107,7 +110,8 @@ func AbgleichenMitProtokoll(ctx context.Context, db *sql.DB, lieferantID int, la
 			bildArray = pq.Array(append([]string{}, bilder[z.LieferantenNr]...))
 		}
 		if _, err := copy.ExecContext(ctx, z.LieferantenNr, z.Bezeichnung, z.Beschreibung, z.Hersteller,
-			z.HerstellerNr, z.EAN, z.Kategorie, z.GewichtG, z.EK, z.Lagerbestand, z.LieferfristTg, bildArray); err != nil {
+			z.HerstellerNr, z.EAN, z.Kategorie, z.Kategorie2, z.Kategorie3, z.GewichtG, z.EK, z.Lagerbestand,
+			z.LieferfristTg, bildArray); err != nil {
 			copy.Close()
 			return b, err
 		}
@@ -204,11 +208,14 @@ func AbgleichenMitProtokoll(ctx context.Context, db *sql.DB, lieferantID int, la
 	if err := zaehlen(&b.StammdatenGeaendert, `WITH u AS (
 			UPDATE artikel a SET bezeichnung = i.bezeichnung,
 				beschreibung = i.beschreibung, hersteller = i.hersteller, hersteller_nr = i.hersteller_nr,
-				ean = i.ean, kategorie = i.kategorie, gewicht_g = i.gewicht_g
+				ean = i.ean, kategorie = i.kategorie, kategorie2 = i.kategorie2, kategorie3 = i.kategorie3,
+				gewicht_g = i.gewicht_g
 			FROM imp i JOIN angebote an ON an.lieferant_id = $1 AND an.lieferanten_nr = i.lieferanten_nr
 			WHERE a.id = an.artikel_id AND a.quelle_lieferant_id = $1
-			  AND (a.bezeichnung, a.beschreibung, a.hersteller, a.hersteller_nr, a.ean, a.kategorie, a.gewicht_g)
-			      IS DISTINCT FROM (i.bezeichnung, i.beschreibung, i.hersteller, i.hersteller_nr, i.ean, i.kategorie, i.gewicht_g)
+			  AND (a.bezeichnung, a.beschreibung, a.hersteller, a.hersteller_nr, a.ean, a.kategorie,
+			       a.kategorie2, a.kategorie3, a.gewicht_g)
+			      IS DISTINCT FROM (i.bezeichnung, i.beschreibung, i.hersteller, i.hersteller_nr, i.ean, i.kategorie,
+			       i.kategorie2, i.kategorie3, i.gewicht_g)
 			RETURNING a.id),
 		  s AS (INSERT INTO suche SELECT id FROM u RETURNING 1)
 		SELECT count(*) FROM s`, lieferantID); err != nil {
@@ -254,9 +261,9 @@ func AbgleichenMitProtokoll(ctx context.Context, db *sql.DB, lieferantID int, la
 		}
 	}
 	if err := anzahl(&b.ArtikelNeu, `INSERT INTO artikel (id, bezeichnung, beschreibung, hersteller, hersteller_nr,
-			ean, kategorie, gewicht_g, quelle_lieferant_id)
+			ean, kategorie, kategorie2, kategorie3, gewicht_g, quelle_lieferant_id)
 		SELECT DISTINCT ON (artikel_id) artikel_id, bezeichnung, beschreibung, hersteller, hersteller_nr,
-			ean, kategorie, gewicht_g, $1
+			ean, kategorie, kategorie2, kategorie3, gewicht_g, $1
 		FROM neu WHERE neu ORDER BY artikel_id, lieferanten_nr`, lieferantID); err != nil {
 		return b, err
 	}
@@ -318,6 +325,70 @@ func AbgleichenMitProtokoll(ctx context.Context, db *sql.DB, lieferantID int, la
 	if b.EANMehrdeutig > 0 {
 		b.Hinweise = append(b.Hinweise, fmt.Sprintf("%d Artikel mit einer EAN, die im Katalog mehrfach vorkommt, "+
 			"wurden über die Herstellernummer zugeordnet oder neu angelegt.", b.EANMehrdeutig))
+	}
+	return b, nil
+}
+
+// BestandAbgleichen führt nur den Lagerbestand bestehender, aktiver Angebote
+// nach (Lagerbestandsliste, mehrmals täglich). Angebote, die in der Liste
+// fehlen, bleiben unverändert; Nummern ohne Angebot werden gezählt.
+func BestandAbgleichen(ctx context.Context, db *sql.DB, lieferantID int, bestand map[string]int) (Bericht, error) {
+	start := time.Now()
+	b := Bericht{Zeilen: len(bestand)}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return b, err
+	}
+	defer tx.Rollback()
+	for _, s := range []string{
+		`SET LOCAL arthub.massenimport = '1'`,
+		`CREATE TEMP TABLE bst (lieferanten_nr TEXT PRIMARY KEY, lagerbestand INTEGER) ON COMMIT DROP`,
+	} {
+		if _, err := tx.ExecContext(ctx, s); err != nil {
+			return b, err
+		}
+	}
+	copy, err := tx.PrepareContext(ctx, pq.CopyIn("bst", "lieferanten_nr", "lagerbestand"))
+	if err != nil {
+		return b, err
+	}
+	for nr, n := range bestand {
+		if _, err := copy.ExecContext(ctx, nr, n); err != nil {
+			copy.Close()
+			return b, err
+		}
+	}
+	if _, err := copy.ExecContext(ctx); err != nil {
+		copy.Close()
+		return b, err
+	}
+	if err := copy.Close(); err != nil {
+		return b, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM bst b WHERE NOT EXISTS
+		(SELECT 1 FROM angebote an WHERE an.lieferant_id = $1 AND an.lieferanten_nr = b.lieferanten_nr)`,
+		lieferantID).Scan(&b.Unbekannt); err != nil {
+		return b, err
+	}
+	// Bestand nachführen und den Stand der betroffenen Artikel erhöhen (Delta-Abgleich)
+	if err := tx.QueryRowContext(ctx, `WITH u AS (
+			UPDATE angebote an SET lagerbestand = b.lagerbestand, geaendert = now()
+			FROM bst b
+			WHERE an.lieferant_id = $1 AND an.lieferanten_nr = b.lieferanten_nr AND an.aktiv
+			  AND an.lagerbestand IS DISTINCT FROM b.lagerbestand
+			RETURNING an.artikel_id),
+		  a AS (UPDATE artikel SET geaendert = now() WHERE id IN (SELECT artikel_id FROM u) RETURNING 1)
+		SELECT (SELECT count(*) FROM u)`, lieferantID).Scan(&b.BestandGeaendert); err != nil {
+		return b, err
+	}
+	if err := tx.Commit(); err != nil {
+		return b, err
+	}
+	b.AngeboteGeaendert = b.BestandGeaendert
+	b.Sekunden = time.Since(start).Round(100 * time.Millisecond).Seconds()
+	if b.Unbekannt > 0 {
+		b.Hinweise = append(b.Hinweise, fmt.Sprintf("%d Nummern der Lagerbestandsliste haben (noch) kein Angebot – "+
+			"sie kommen mit dem nächsten Import der Preisliste.", b.Unbekannt))
 	}
 	return b, nil
 }

@@ -21,12 +21,12 @@ type fakeKatalog struct {
 	nurVerfuegbar bool
 }
 
-func (f *fakeKatalog) Seit(_ context.Context, seit int64, limit int) ([]katalog.Artikel, bool, error) {
+func (f *fakeKatalog) Seit(_ context.Context, _ string, seit int64, limit int) ([]katalog.Artikel, bool, error) {
 	f.seit, f.limit = seit, int64(limit)
 	return f.artikel, f.mehr, nil
 }
 
-func (f *fakeKatalog) Nummer(_ context.Context, nummer string) (katalog.Artikel, error) {
+func (f *fakeKatalog) Nummer(_ context.Context, _, nummer string) (katalog.Artikel, error) {
 	for _, a := range f.artikel {
 		if a.Nummer == nummer {
 			return a, nil
@@ -35,7 +35,7 @@ func (f *fakeKatalog) Nummer(_ context.Context, nummer string) (katalog.Artikel,
 	return katalog.Artikel{}, katalog.ErrNichtGefunden
 }
 
-func (f *fakeKatalog) Suche(_ context.Context, q string, limit int, nurVerfuegbar bool) ([]katalog.Artikel, bool, error) {
+func (f *fakeKatalog) Suche(_ context.Context, _, q string, limit int, nurVerfuegbar bool) ([]katalog.Artikel, bool, error) {
 	f.q, f.nurVerfuegbar, f.limit = q, nurVerfuegbar, int64(limit)
 	return f.artikel, f.mehr, nil
 }

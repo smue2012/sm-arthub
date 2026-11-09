@@ -212,4 +212,56 @@ dialog.protokoll::backdrop { background: rgba(0, 0, 0, 0.35); }
   .pr-liste th:nth-child(1), .pr-liste td:nth-child(1), .pr-liste th:nth-child(2), .pr-liste td:nth-child(2) { display: none; }
   .protokoll-fuss { flex-direction: column; align-items: stretch; }
 }
+.feld-gitter .unterteil { border-top: 1px solid var(--linie); padding-top: 12px; margin-top: 4px; }
+/* ---------- Ansichten ---------- */
+.kopf { gap: 16px; }
+.ansichten { display: flex; gap: 4px; margin-right: auto; margin-left: 24px; }
+.ansichten a { padding: 6px 12px; border-radius: 6px; color: var(--leise); text-decoration: none; }
+.ansichten a:hover { color: var(--text); background: var(--grund); }
+.ansichten a.aktiv { color: var(--akzent); font-weight: 600; background: var(--grund); }
+main.breit { max-width: 1320px; }
+
+/* ---------- Katalog & Auswahl ---------- */
+.kat-leiste { margin-bottom: 16px; }
+.kat-app { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; }
+.kat-app select { min-width: 220px; }
+.kat-app + .hinweis { margin: 10px 0 0; }
+.kat-raster { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; align-items: start; }
+.kat-raster .karte + .karte { margin-top: 0; }
+.kat-baum-karte { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; padding: 16px; }
+.baum, .baum ul { list-style: none; margin: 0; padding: 0; }
+.baum ul { padding-left: 18px; }
+.baum li > .knoten { display: flex; align-items: center; gap: 4px; min-height: 30px; }
+.baum .auf { width: 22px; height: 22px; border: 0; background: none; color: var(--leise); cursor: pointer; padding: 0; font-size: 12px; flex: none; }
+.baum .auf:disabled { visibility: hidden; }
+.baum input[type=checkbox], .kat-tabelle input[type=checkbox] { width: auto; margin: 0 4px 0 0; flex: none; }
+.baum-name { border: 0; background: none; font: inherit; color: var(--text); text-align: left; cursor: pointer; padding: 3px 6px;
+  border-radius: 5px; flex: 1; display: flex; justify-content: space-between; gap: 8px; }
+.baum-name span { color: var(--leise); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.baum-name:hover { background: var(--grund); }
+.baum-name.aktiv { background: var(--grund); color: var(--akzent); font-weight: 600; }
+#kat-alle { width: 100%; margin-bottom: 6px; }
+.geerbt { opacity: 0.55; }
+.kat-liste .zeile input[type=search] { flex: 1; }
+.kat-liste #kat-pfad { margin: 10px 0 0; }
+.kat-tabelle td { vertical-align: top; }
+.kat-tabelle .kat-wahl { width: 28px; }
+.kat-tabelle .r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kat-tabelle .unter { color: var(--leise); font-size: 0.82rem; margin-top: 2px; }
+.kat-tabelle .leer-bestand { color: var(--gefahr); }
+.kat-tabelle tr.gewaehlt { background: color-mix(in srgb, var(--akzent) 8%, transparent); }
+.seiten { justify-content: space-between; margin-top: 12px; }
+@media (max-width: 900px) {
+  .kat-raster { grid-template-columns: 1fr; }
+  .kat-baum-karte { position: static; max-height: 50vh; }
+  .ansichten { margin-left: 8px; }
+}
+@media (max-width: 640px) {
+  .kopf { flex-wrap: wrap; }
+  .ansichten { order: 3; width: 100%; margin: 0; }
+  .kat-tabelle th:nth-child(3), .kat-tabelle td:nth-child(3), .kat-tabelle th:nth-child(5), .kat-tabelle td:nth-child(5) { display: none; }
+  .kat-tabelle thead, .pr-liste .liste thead { display: table-header-group; }
+  .kat-tabelle tr, .pr-liste .liste tr { display: table-row; }
+  .kat-tabelle td, .pr-liste .liste td { padding: 8px 4px; border-bottom: 1px solid var(--linie); }
+}
 [hidden] { display: none !important; }

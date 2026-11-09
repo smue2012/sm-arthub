@@ -98,7 +98,7 @@ func TestBestpreis(t *testing.T) {
 	muss(t, db, `INSERT INTO artikel (bezeichnung) VALUES ('Leer')`)
 
 	r := katalog.Repository{DB: db}
-	liste, mehr, err := r.Seit(ctx, 0, 10)
+	liste, mehr, err := r.Seit(ctx, "", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,16 +145,16 @@ func TestDeltaAbgleich(t *testing.T) {
 		VALUES ($1, $2, 'X', 1)`, a1, l)
 
 	// Seitenweise holen
-	s1, mehr, err := r.Seit(ctx, 0, 1)
+	s1, mehr, err := r.Seit(ctx, "", 0, 1)
 	if err != nil || len(s1) != 1 || !mehr {
 		t.Fatalf("seite 1: %d %v %v", len(s1), mehr, err)
 	}
-	s2, mehr, err := r.Seit(ctx, s1[0].Stand, 1)
+	s2, mehr, err := r.Seit(ctx, "", s1[0].Stand, 1)
 	if err != nil || len(s2) != 1 || mehr {
 		t.Fatalf("seite 2: %d %v %v", len(s2), mehr, err)
 	}
 	stand := s2[0].Stand
-	if leer, _, _ := r.Seit(ctx, stand, 10); len(leer) != 0 {
+	if leer, _, _ := r.Seit(ctx, "", stand, 10); len(leer) != 0 {
 		t.Fatalf("nichts geändert, trotzdem %d", len(leer))
 	}
 
@@ -162,7 +162,7 @@ func TestDeltaAbgleich(t *testing.T) {
 	if _, err := db.Exec(`UPDATE angebote SET ek = 2 WHERE id = $1`, an); err != nil {
 		t.Fatal(err)
 	}
-	neu, _, _ := r.Seit(ctx, stand, 10)
+	neu, _, _ := r.Seit(ctx, "", stand, 10)
 	if len(neu) != 1 || neu[0].Bezeichnung != "Eins" || neu[0].Bestes.EK != "2.0000" {
 		t.Fatalf("nach EK-Änderung: %+v", neu)
 	}
@@ -170,7 +170,7 @@ func TestDeltaAbgleich(t *testing.T) {
 	// Inaktiv gesetzter Artikel kommt mit aktiv=false
 	stand = neu[0].Stand
 	db.Exec(`UPDATE artikel SET aktiv = false WHERE bezeichnung = 'Zwei'`)
-	neu, _, _ = r.Seit(ctx, stand, 10)
+	neu, _, _ = r.Seit(ctx, "", stand, 10)
 	if len(neu) != 1 || neu[0].Aktiv {
 		t.Fatalf("inaktiv: %+v", neu)
 	}
@@ -178,7 +178,7 @@ func TestDeltaAbgleich(t *testing.T) {
 	// Angebot gelöscht → Artikel ohne Angebot
 	stand = neu[0].Stand
 	db.Exec(`DELETE FROM angebote WHERE id = $1`, an)
-	neu, _, _ = r.Seit(ctx, stand, 10)
+	neu, _, _ = r.Seit(ctx, "", stand, 10)
 	if len(neu) != 1 || neu[0].Bestes != nil {
 		t.Fatalf("nach Löschen: %+v", neu)
 	}
@@ -235,7 +235,7 @@ func TestSuche(t *testing.T) {
 
 	treffer := func(q string, verf bool) []string {
 		t.Helper()
-		liste, _, err := r.Suche(ctx, q, 10, verf)
+		liste, _, err := r.Suche(ctx, "", q, 10, verf)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -266,8 +266,95 @@ func TestSuche(t *testing.T) {
 	if n := treffer("10_%", false); len(n) != 0 {
 		t.Errorf("_ und %% wörtlich: %v", n)
 	}
-	liste, mehr, _ := r.Suche(ctx, "mx", 1, false)
+	liste, mehr, _ := r.Suche(ctx, "", "mx", 1, false)
 	if len(liste) != 1 || !mehr || liste[0].Bestes == nil {
 		t.Errorf("limit/mehr: %d %v", len(liste), mehr)
+	}
+}
+
+func TestAuswahlJeApp(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	r := katalog.Repository{DB: db}
+	l := muss(t, db, `INSERT INTO lieferanten (kuerzel, name) VALUES ('alltron', 'Alltron')`)
+	neu := func(bez, k1, k2, k3 string) string {
+		id := muss(t, db, `INSERT INTO artikel (bezeichnung, kategorie, kategorie2, kategorie3) VALUES ($1, $2, $3, $4)`, bez, k1, k2, k3)
+		muss(t, db, `INSERT INTO angebote (artikel_id, lieferant_id, lieferanten_nr, ek, lagerbestand) VALUES ($1, $2, $3, 10, 1)`, id, l, bez)
+		var nr string
+		db.QueryRow(`SELECT nummer FROM artikel WHERE id = $1`, id).Scan(&nr)
+		return nr
+	}
+	nb := neu("Testgeraet Notebook", "Computer & Zubehör", "Notebooks", "Business")
+	neu("Testgeraet Monitor", "Computer & Zubehör", "Monitore", "Office")
+	toaster := neu("Testgeraet Toaster", "Haushalt & Gastro", "Kochen", "Toaster")
+	neu("Testgeraet Kabel", "Computer & Zubehör", "Notebooks-Zubehör", "Kabel") // gleicher Anfang, anderer Zweig
+	v := schluessel.Verwaltung{DB: db}
+	v.Anlegen(ctx, "sst")
+	v.Anlegen(ctx, "shop")
+
+	anzahl := func(app string) int {
+		t.Helper()
+		liste, _, err := r.Suche(ctx, app, "testgeraet", 50, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(liste)
+	}
+	if anzahl("sst") != 4 {
+		t.Fatal("ohne «nur Auswahl» sieht die App alles")
+	}
+	if err := r.AuswahlModus(ctx, "sst", true); err != nil {
+		t.Fatal(err)
+	}
+	if anzahl("sst") != 0 || anzahl("shop") != 4 || anzahl("") != 4 {
+		t.Fatalf("leere Auswahl: sst %d, shop %d, intern %d", anzahl("sst"), anzahl("shop"), anzahl(""))
+	}
+	// Kategorie «Computer & Zubehör > Notebooks» → nur das Notebook (nicht «Notebooks-Zubehör»)
+	r.AuswahlSetzen(ctx, "sst", "kategorie", katalog.KategoriePfad("Computer & Zubehör", "Notebooks"), true)
+	r.AuswahlSetzen(ctx, "sst", "artikel", toaster, true)
+	liste, _, _ := r.Suche(ctx, "sst", "testgeraet", 50, false)
+	if len(liste) != 2 {
+		t.Fatalf("Auswahl: %d Treffer, erwartet Notebook + Toaster", len(liste))
+	}
+	if _, err := r.Nummer(ctx, "sst", nb); err != nil {
+		t.Errorf("Notebook per Nummer: %v", err)
+	}
+	if _, err := r.Nummer(ctx, "sst", liste[0].Nummer); err != nil {
+		t.Errorf("Nummer: %v", err)
+	}
+	seit, _, _ := r.Seit(ctx, "sst", 0, 100)
+	if len(seit) != 2 {
+		t.Errorf("Seit mit Auswahl: %d", len(seit))
+	}
+	a, err := r.AuswahlLesen(ctx, "sst")
+	if err != nil || !a.NurAuswahl || len(a.Kategorien) != 1 || len(a.Artikel) != 1 || a.Anzahl != 2 {
+		t.Fatalf("AuswahlLesen: %+v %v", a, err)
+	}
+	// Ganze Ebene 1 → drei Computer-Artikel + Toaster
+	r.AuswahlSetzen(ctx, "sst", "kategorie", "Computer & Zubehör", true)
+	if n := anzahl("sst"); n != 4 {
+		t.Errorf("Ebene 1: %d", n)
+	}
+	r.AuswahlSetzen(ctx, "sst", "artikel", toaster, false)
+	if n := anzahl("sst"); n != 3 {
+		t.Errorf("Toaster entfernt: %d", n)
+	}
+	if err := r.AuswahlSetzen(ctx, "gibtsnicht", "artikel", toaster, true); err != katalog.ErrAppUnbekannt {
+		t.Errorf("unbekannte App: %v", err)
+	}
+
+	baum, _ := r.Kategorien(ctx)
+	if len(baum) != 2 || baum[0].Name != "Computer & Zubehör" || baum[0].Anzahl != 3 || len(baum[0].Unter) != 3 {
+		t.Fatalf("Baum: %+v", baum[0])
+	}
+	if baum[0].Unter[1].Pfad != "Computer & Zubehör > Notebooks" {
+		t.Errorf("Pfad: %q", baum[0].Unter[1].Pfad)
+	}
+	bl, gesamt, err := r.Blaettern(ctx, "Computer & Zubehör > Notebooks", "", false, 0, 50)
+	if err != nil || gesamt != 1 || len(bl) != 1 || bl[0].Bestes == nil {
+		t.Fatalf("Blättern: %d %d %v", gesamt, len(bl), err)
+	}
+	if _, gesamt, _ := r.Blaettern(ctx, "", "toaster", false, 0, 50); gesamt != 1 {
+		t.Errorf("Blättern mit Suche: %d", gesamt)
 	}
 }

@@ -33,7 +33,9 @@ type Zeile struct {
 	Hersteller    string
 	HerstellerNr  string
 	EAN           string
-	Kategorie     string
+	Kategorie     string // Ebene 1
+	Kategorie2    string
+	Kategorie3    string
 	GewichtG      *int
 	EK            string // Dezimalpunkt, z.B. "6.85"
 	Lagerbestand  int
@@ -62,6 +64,8 @@ var competecSpalten = map[string][]string{
 	"herstellernr": {"herstellernummer"},
 	"hersteller":   {"hersteller"},
 	"kategorie":    {"kategorie1"},
+	"kategorie2":   {"kategorie2"},
+	"kategorie3":   {"kategorie3"},
 	"ean":          {"eancode", "ean"},
 	"lieferdatum":  {"lieferdatum"},
 }
@@ -158,6 +162,8 @@ func CompetecLesen(daten []byte) (zeilen []Zeile, uebersprungen int, err error) 
 			HerstellerNr:  kuerzen(feld(z, "herstellernr"), 100),
 			EAN:           ean(feld(z, "ean")),
 			Kategorie:     kuerzen(feld(z, "kategorie"), 200),
+			Kategorie2:    kuerzen(feld(z, "kategorie2"), 200),
+			Kategorie3:    kuerzen(feld(z, "kategorie3"), 200),
 			EK:            strconv.FormatFloat(math.Round(ek*10000)/10000, 'f', -1, 64),
 		}
 		if b, ok := zahl(feld(z, "bestand")); ok {
@@ -237,4 +243,85 @@ func BildlisteLesen(daten []byte) (map[string][]string, error) {
 		return nil, Fehler("Bildliste: keine Zeilen «Artikelnummer;Bild-Link» gefunden")
 	}
 	return links, nil
+}
+
+// ---------- Lagerbestandsliste ----------
+//
+// Competec liefert zusätzlich eine kurze Liste nur mit dem Bestand, die
+// mehrmals täglich neu ist: Tabulator, Kopfzeile «Nummer 2», «Lagerbestand»
+// (z.B. «723591 -1», «1649149 0»). Negative Werte = nicht an Lager.
+
+// IstBestandsliste erkennt die Lagerbestandsliste an der Kopfzeile (keine
+// Bezeichnung, kein Preis, aber Nummer und Lagerbestand).
+func IstBestandsliste(daten []byte) bool {
+	daten = bytes.TrimPrefix(daten, []byte("\xef\xbb\xbf"))
+	kopf, _, _ := bytes.Cut(daten, []byte("\n"))
+	var hatNr, hatBestand, hatMehr bool
+	for _, f := range strings.FieldsFunc(string(kopf), func(r rune) bool { return r == '\t' || r == ';' }) {
+		switch spaltenSchluessel(f) {
+		case "nummer2", "artikelnummer2":
+			hatNr = true
+		case "lagerbestand":
+			hatBestand = true
+		case "bezeichung", "bezeichnung", "preisexklmwst":
+			hatMehr = true
+		}
+	}
+	return hatNr && hatBestand && !hatMehr
+}
+
+// BestandLesen liest die Lagerbestandsliste: Lieferanten-Nr. → Bestand (≥ 0).
+func BestandLesen(daten []byte) (map[string]int, error) {
+	daten = bytes.TrimPrefix(daten, []byte("\xef\xbb\xbf"))
+	trenn := '\t'
+	erste, _, _ := bytes.Cut(daten, []byte("\n"))
+	if !bytes.ContainsRune(erste, '\t') && bytes.ContainsRune(erste, ';') {
+		trenn = ';'
+	}
+	r := csv.NewReader(bytes.NewReader(daten))
+	r.Comma = trenn
+	r.LazyQuotes = true
+	r.FieldsPerRecord = -1
+	r.ReuseRecord = true
+	kopf, err := r.Read()
+	if err != nil {
+		return nil, Fehler("Lagerbestandsliste: Kopfzeile nicht lesbar")
+	}
+	nr, best := -1, -1
+	for i, f := range kopf {
+		switch spaltenSchluessel(f) {
+		case "nummer2", "artikelnummer2":
+			if nr < 0 {
+				nr = i
+			}
+		case "lagerbestand":
+			best = i
+		}
+	}
+	if nr < 0 || best < 0 {
+		return nil, Fehler("Lagerbestandsliste: Spalten «Nummer 2» und «Lagerbestand» erwartet")
+	}
+	bestand := map[string]int{}
+	for {
+		z, err := r.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil || nr >= len(z) || best >= len(z) {
+			continue
+		}
+		n := strings.TrimSpace(z[nr])
+		if n == "" || len(n) > 60 {
+			continue
+		}
+		wert := 0
+		if b, ok := zahl(z[best]); ok { // «-1» liefert zahl() als nicht ok → 0
+			wert = int(b)
+		}
+		bestand[n] = wert
+	}
+	if len(bestand) == 0 {
+		return nil, Fehler("Lagerbestandsliste: keine Zeilen gefunden")
+	}
+	return bestand, nil
 }

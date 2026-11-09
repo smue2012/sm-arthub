@@ -10,6 +10,10 @@
 <body>
 <header class="kopf">
   <div class="marke">sm-arthub <span>Artikelkatalog-Hub</span></div>
+  <nav id="ansichten" class="ansichten" hidden>
+    <a href="#" data-ansicht="verwaltung">Verwaltung</a>
+    <a href="#katalog" data-ansicht="katalog">Katalog &amp; Auswahl</a>
+  </nav>
   <button type="button" id="abmelden" class="knopf leise" hidden>Abmelden</button>
 </header>
 
@@ -97,6 +101,39 @@
       <p class="hinweis klein">Einen Import anklicken für das Protokoll: neue Artikel, Zuordnungen, EK-Änderungen, weggefallene Angebote (90 Tage aufbewahrt).</p>
     </section>
   </div>
+  <div id="katalog-ansicht" hidden>
+    <section class="karte kat-leiste">
+      <div class="kat-app">
+        <div><label for="kat-app">Auswahl für Applikation</label><select id="kat-app"></select></div>
+        <label class="inline"><input type="checkbox" id="kat-nur"> Nur die Auswahl liefern</label>
+      </div>
+      <p id="kat-zusammenfassung" class="hinweis"></p>
+    </section>
+    <div class="kat-raster">
+      <section class="karte kat-baum-karte">
+        <h2>Kategorien</h2>
+        <button type="button" id="kat-alle" class="baum-name aktiv">Alle Artikel <span id="kat-alle-anzahl"></span></button>
+        <ul id="kat-baum" class="baum"></ul>
+      </section>
+      <section class="karte kat-liste">
+        <div class="zeile">
+          <label for="kat-q" class="unsichtbar">Suche</label>
+          <input type="search" id="kat-q" placeholder="Bezeichnung, Hersteller, Herstellernr., EAN oder Lieferanten-Nr." autocomplete="off">
+          <label class="inline"><input type="checkbox" id="kat-lager"> nur an Lager</label>
+        </div>
+        <p id="kat-pfad" class="hinweis"></p>
+        <table class="liste kat-tabelle">
+          <thead><tr><th class="kat-wahl"></th><th>Artikel</th><th>Bester Lieferant</th><th class="r">Lager</th><th class="r">EK</th></tr></thead>
+          <tbody id="kat-artikel"></tbody>
+        </table>
+        <div class="zeile seiten">
+          <button type="button" id="kat-zurueck" class="knopf leise">‹ Zurück</button>
+          <span id="kat-seite" class="hinweis"></span>
+          <button type="button" id="kat-weiter" class="knopf leise">Weiter ›</button>
+        </div>
+      </section>
+    </div>
+  </div>
 </main>
 
 <dialog id="protokoll" class="protokoll">
@@ -139,10 +176,16 @@
         <input name="bildliste_url" placeholder="sftp://server/Bildliste.csv" autocomplete="off"></div>
       <div><label>Täglich um</label><input name="zeit" placeholder="05:15" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" maxlength="5"></div>
       <div class="check"><label class="inline"><input type="checkbox" name="aktiv"> Zeitplan eingeschaltet</label></div>
+      <div class="breit unterteil"><label>Adresse der Lagerbestandsliste (nur Bestand, mehrmals täglich)</label>
+        <input name="bestand_url" placeholder="sftp://ftp.competec.ch/Lagerbestand.csv" autocomplete="off"></div>
+      <div><label>Bestand alle … Minuten</label><input name="bestand_intervall" type="number" min="0" max="1440" step="15" placeholder="0 = aus"></div>
+      <div><label>von</label><input name="bestand_von" placeholder="07:00" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" maxlength="5"></div>
+      <div><label>bis</label><input name="bestand_bis" placeholder="19:00" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" maxlength="5"></div>
     </div>
     <p class="l-fehler meldung fehler" hidden></p>
     <div class="zeile rechts lief-aktionen">
-      <label class="knopf leise datei-knopf">Datei hochladen …<input type="file" class="l-datei" accept=".csv,.txt" hidden></label>
+      <label class="knopf leise datei-knopf" title="Preisliste oder Lagerbestandsliste – wird an der Kopfzeile erkannt">Datei hochladen …<input type="file" class="l-datei" accept=".csv,.txt" hidden></label>
+      <button type="button" class="knopf leise l-bestand" title="Nur die Lagerbestandsliste laden">Bestand jetzt laden</button>
       <button type="button" class="knopf leise l-importieren">Jetzt importieren</button>
       <button type="submit" class="knopf">Speichern</button>
     </div>

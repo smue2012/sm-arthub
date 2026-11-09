@@ -45,6 +45,12 @@ Abgleich (in einer Transaktion; gemessen mit 236'000 Zeilen: ~14 s beim ersten M
 - **Schutz:** Enthält die Liste weniger als die Hälfte der bisher aktiven Angebote (z.B. abgebrochene
   Übertragung), wird nichts geändert.
 
+**Lagerbestandsliste** (nur Bestand, Competec: Spalten `Nummer 2`, `Lagerbestand`): eigene Adresse,
+«Bestand alle … Minuten» (15–1440, 0 = aus) in einem Zeitfenster (Vorgabe 07:00–19:00) oder
+«Bestand jetzt laden». Sie führt nur den Bestand bestehender Angebote nach (negativ = 0), deaktiviert
+nichts und braucht wenige Sekunden. «Datei hochladen …» erkennt an der Kopfzeile, ob es die Preisliste
+oder die Lagerbestandsliste ist.
+
 Jeder Lauf steht unter **Letzte Importe** mit Ergebnis oder Fehlermeldung. Ein Klick auf einen
 Lauf öffnet das **Protokoll**: neue Artikel, bestehenden Artikeln zugeordnet, EK geändert (alt → neu),
 Stammdaten geändert, nicht mehr gelistet, wieder gelistet – je als Reiter, die ersten 500 Zeilen in der
@@ -87,6 +93,17 @@ einen neuen, steigenden `stand`. Eine App
 Artikel werden nie gelöscht, nur `aktiv: false` gesetzt – so erfährt die App
 den Wegfall. Auf Belegen speichern die Apps die Artikeldaten als Kopie, nie als
 Verweis auf den Hub (GeBüV).
+
+## Katalog & Auswahl je App
+
+In der Verwaltung unter **Katalog & Auswahl**: Kategoriebaum (Competec «Kategorie 1–3») und
+Artikelliste mit Suche, «nur an Lager» und bestem Angebot.
+
+Je App (API-Schlüssel) lassen sich **Kategorien** (ganzer Zweig ab der gewählten Ebene) und
+**Einzelartikel** anhaken. Mit **«Nur die Auswahl liefern»** erhält die App über die Lese-API nur diese
+Artikel (Suche, Artikel per Nummer, Delta-Abgleich); ohne sieht sie den ganzen Katalog. Die Auswahl
+wirkt sofort, die Apps brauchen nichts dafür. Hinweis Delta-Abgleich: Eine geänderte Auswahl gibt den
+Artikeln keinen neuen Stand – Apps mit lokaler Kopie holen danach einmal mit `seit=0`.
 
 ## Verwaltungsoberfläche und API-Schlüssel
 
@@ -161,7 +178,7 @@ danach das Image.
 | --- | --- |
 | `cmd/sm-arthub` | Start, Healthcheck, Befehle für API-Schlüssel |
 | `internal/datenbank` | Verbindung, Migrationen |
-| `internal/katalog` | Artikel und Angebote lesen, Bestpreis-Regel |
+| `internal/katalog` | Artikel und Angebote lesen, Bestpreis-Regel, Auswahl je App, Kategoriebaum, Blättern |
 | `internal/schluessel` | API-Schlüssel (nur Hash gespeichert) |
 | `internal/api` | Lese-API v1 |
 | `internal/importer` | Preislisten holen (sftp mit Fingerabdruck, ftps, https), Competec lesen, Abgleich, Zeitplan |

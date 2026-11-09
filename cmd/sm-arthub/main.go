@@ -128,6 +128,7 @@ func starten(log *slog.Logger, port string) error {
 				Schluessel:       schluessel.Verwaltung{DB: db},
 				Status:           statusQuelle(db),
 				Importe:          importe,
+				Katalog:          katalog.Repository{DB: db},
 				Log:              log,
 				FehlVerzoegerung: time.Second,
 			}),

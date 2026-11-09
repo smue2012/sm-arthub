@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/smue2012/sm-arthub/internal/importer"
+	"github.com/smue2012/sm-arthub/internal/katalog"
 	"github.com/smue2012/sm-arthub/internal/schluessel"
 )
 
@@ -71,12 +72,22 @@ type Importe interface {
 	Details(ctx context.Context, laufID int64, art string, limit int) (map[string]int, []importer.Detail, error)
 }
 
+// Katalog: was der Artikelbrowser braucht.
+type Katalog interface {
+	Kategorien(ctx context.Context) ([]*katalog.Kategorie, error)
+	Blaettern(ctx context.Context, pfad, q string, nurVerfuegbar bool, seite, proSeite int) ([]katalog.Artikel, int, error)
+	AuswahlLesen(ctx context.Context, app string) (katalog.Auswahl, error)
+	AuswahlModus(ctx context.Context, app string, nurAuswahl bool) error
+	AuswahlSetzen(ctx context.Context, app, art, wert string, an bool) error
+}
+
 // Optionen der Oberfläche.
 type Optionen struct {
 	Passwort   string
 	Schluessel Schluessel
 	Status     StatusQuelle
 	Importe    Importe
+	Katalog    Katalog
 	Log        *slog.Logger
 	// FehlVerzoegerung bremst falsche Anmeldungen (Vorgabe 1 s, im Test 0).
 	FehlVerzoegerung time.Duration
@@ -108,6 +119,13 @@ func Handler(opt Optionen) http.Handler {
 	api.Handle("GET /api/schluessel", s.nurAngemeldet(s.liste))
 	api.Handle("POST /api/schluessel", s.nurAngemeldet(s.anlegen))
 	api.Handle("POST /api/schluessel/{name}/sperren", s.nurAngemeldet(s.sperren))
+	if opt.Katalog != nil {
+		api.Handle("GET /api/katalog/kategorien", s.nurAngemeldet(s.kategorien))
+		api.Handle("GET /api/katalog/artikel", s.nurAngemeldet(s.blaettern))
+		api.Handle("GET /api/auswahl/{app}", s.nurAngemeldet(s.auswahl))
+		api.Handle("PUT /api/auswahl/{app}", s.nurAngemeldet(s.auswahlModus))
+		api.Handle("POST /api/auswahl/{app}/eintrag", s.nurAngemeldet(s.auswahlEintrag))
+	}
 	if opt.Importe != nil {
 		api.Handle("GET /api/lieferanten", s.nurAngemeldet(s.lieferanten))
 		api.Handle("POST /api/lieferanten", s.nurAngemeldet(s.lieferantAnlegen))
@@ -358,7 +376,11 @@ func (s *server) fingerabdruck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) importieren(w http.ResponseWriter, r *http.Request) {
-	id, err := s.opt.Importe.Starten(r.PathValue("kuerzel"), "abruf", nil)
+	art := "abruf"
+	if r.URL.Query().Get("art") == "bestand" {
+		art = "bestand"
+	}
+	id, err := s.opt.Importe.Starten(r.PathValue("kuerzel"), art, nil)
 	if err != nil {
 		s.importFehler(w, err)
 		return
@@ -484,6 +506,94 @@ func csvSicher(s string) string {
 		return "'" + s
 	}
 	return s
+}
+
+// ---------- Artikelbrowser und Auswahl je App ----------
+
+// ProSeite: Artikel je Seite im Browser.
+const ProSeite = 100
+
+func (s *server) kategorien(w http.ResponseWriter, r *http.Request) {
+	baum, err := s.opt.Katalog.Kategorien(r.Context())
+	if err != nil {
+		s.serverfehler(w, err)
+		return
+	}
+	jsonAntwort(w, http.StatusOK, map[string]any{"kategorien": baum})
+}
+
+func (s *server) blaettern(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	seite, _ := strconv.Atoi(q.Get("seite"))
+	if seite < 0 || seite > 10000 {
+		seite = 0
+	}
+	text := q.Get("q")
+	if len(text) > 200 {
+		text = text[:200]
+	}
+	liste, gesamt, err := s.opt.Katalog.Blaettern(r.Context(), q.Get("pfad"), text, q.Get("verfuegbar") == "1", seite, ProSeite)
+	if err != nil {
+		s.serverfehler(w, err)
+		return
+	}
+	jsonAntwort(w, http.StatusOK, map[string]any{"artikel": liste, "gesamt": gesamt, "seite": seite, "pro_seite": ProSeite})
+}
+
+func (s *server) auswahlAntwort(w http.ResponseWriter, r *http.Request) {
+	a, err := s.opt.Katalog.AuswahlLesen(r.Context(), r.PathValue("app"))
+	if errors.Is(err, katalog.ErrAppUnbekannt) {
+		fehler(w, http.StatusNotFound, "Applikation nicht gefunden")
+		return
+	}
+	if err != nil {
+		s.serverfehler(w, err)
+		return
+	}
+	jsonAntwort(w, http.StatusOK, a)
+}
+
+func (s *server) auswahl(w http.ResponseWriter, r *http.Request) { s.auswahlAntwort(w, r) }
+
+func (s *server) auswahlModus(w http.ResponseWriter, r *http.Request) {
+	var ein struct {
+		NurAuswahl bool `json:"nur_auswahl"`
+	}
+	if err := lesen(r, &ein); err != nil {
+		fehler(w, http.StatusBadRequest, "ungültige Anfrage")
+		return
+	}
+	if err := s.opt.Katalog.AuswahlModus(r.Context(), r.PathValue("app"), ein.NurAuswahl); err != nil {
+		if errors.Is(err, katalog.ErrAppUnbekannt) {
+			fehler(w, http.StatusNotFound, "Applikation nicht gefunden")
+			return
+		}
+		s.serverfehler(w, err)
+		return
+	}
+	s.opt.Log.Info("auswahl modus", "app", r.PathValue("app"), "nur_auswahl", ein.NurAuswahl, "von", r.RemoteAddr)
+	s.auswahlAntwort(w, r)
+}
+
+func (s *server) auswahlEintrag(w http.ResponseWriter, r *http.Request) {
+	var ein struct {
+		Art  string `json:"art"`
+		Wert string `json:"wert"`
+		An   bool   `json:"an"`
+	}
+	if err := lesen(r, &ein); err != nil || (ein.Art != "kategorie" && ein.Art != "artikel") || ein.Wert == "" || len(ein.Wert) > 700 {
+		fehler(w, http.StatusBadRequest, "ungültige Anfrage")
+		return
+	}
+	if err := s.opt.Katalog.AuswahlSetzen(r.Context(), r.PathValue("app"), ein.Art, ein.Wert, ein.An); err != nil {
+		if errors.Is(err, katalog.ErrAppUnbekannt) {
+			fehler(w, http.StatusNotFound, "Applikation nicht gefunden")
+			return
+		}
+		s.serverfehler(w, err)
+		return
+	}
+	s.auswahlAntwort(w, r)
 }
 
 func (s *server) serverfehler(w http.ResponseWriter, err error) {

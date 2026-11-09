@@ -28,20 +28,24 @@ var Formate = map[string]string{"competec": "Alltron / Competec (ArtikelPreisdat
 
 // Quelle: ein Lieferant mit seinem Import, wie ihn die Verwaltung sieht.
 type Quelle struct {
-	Kuerzel         string `json:"kuerzel"`
-	Name            string `json:"name"`
-	LieferantAktiv  bool   `json:"lieferant_aktiv"`
-	Import          bool   `json:"import"` // Import eingerichtet
-	Format          string `json:"format"`
-	URL             string `json:"url"`
-	Benutzer        string `json:"benutzer"`
-	PasswortGesetzt bool   `json:"passwort_gesetzt"`
-	Fingerabdruck   string `json:"fingerabdruck"`
-	BildlisteURL    string `json:"bildliste_url"`
-	Zeit            string `json:"zeit"`
-	Aktiv           bool   `json:"aktiv"` // Zeitplan an
-	Angebote        int    `json:"angebote"`
-	LetzterLauf     *Lauf  `json:"letzter_lauf"`
+	Kuerzel          string `json:"kuerzel"`
+	Name             string `json:"name"`
+	LieferantAktiv   bool   `json:"lieferant_aktiv"`
+	Import           bool   `json:"import"` // Import eingerichtet
+	Format           string `json:"format"`
+	URL              string `json:"url"`
+	Benutzer         string `json:"benutzer"`
+	PasswortGesetzt  bool   `json:"passwort_gesetzt"`
+	Fingerabdruck    string `json:"fingerabdruck"`
+	BildlisteURL     string `json:"bildliste_url"`
+	Zeit             string `json:"zeit"`
+	Aktiv            bool   `json:"aktiv"` // Zeitplan an
+	BestandURL       string `json:"bestand_url"`
+	BestandIntervall int    `json:"bestand_intervall"` // Minuten, 0 = aus
+	BestandVon       string `json:"bestand_von"`
+	BestandBis       string `json:"bestand_bis"`
+	Angebote         int    `json:"angebote"`
+	LetzterLauf      *Lauf  `json:"letzter_lauf"`
 
 	id       int
 	passwort string
@@ -58,6 +62,10 @@ type Eingabe struct {
 	BildlisteURL     string `json:"bildliste_url"`
 	Zeit             string `json:"zeit"`
 	Aktiv            bool   `json:"aktiv"`
+	BestandURL       string `json:"bestand_url"`
+	BestandIntervall int    `json:"bestand_intervall"`
+	BestandVon       string `json:"bestand_von"`
+	BestandBis       string `json:"bestand_bis"`
 }
 
 // Lauf: ein Import mit Ergebnis.
@@ -103,6 +111,8 @@ func (d *Dienst) Lieferanten(ctx context.Context) ([]Quelle, error) {
 		SELECT l.id, l.kuerzel, l.name, l.aktiv, i.lieferant_id IS NOT NULL,
 		       coalesce(i.format, ''), coalesce(i.url, ''), coalesce(i.benutzer, ''), coalesce(i.passwort, '') <> '',
 		       coalesce(i.fingerabdruck, ''), coalesce(i.bildliste_url, ''), coalesce(i.zeit, ''), coalesce(i.aktiv, false),
+		       coalesce(i.bestand_url, ''), coalesce(i.bestand_intervall, 0), coalesce(i.bestand_von, '07:00'),
+		       coalesce(i.bestand_bis, '19:00'),
 		       (SELECT count(*) FROM angebote an WHERE an.lieferant_id = l.id AND an.aktiv)
 		FROM lieferanten l LEFT JOIN importe i ON i.lieferant_id = l.id
 		ORDER BY l.name`)
@@ -114,7 +124,8 @@ func (d *Dienst) Lieferanten(ctx context.Context) ([]Quelle, error) {
 	for rows.Next() {
 		var q Quelle
 		if err := rows.Scan(&q.id, &q.Kuerzel, &q.Name, &q.LieferantAktiv, &q.Import, &q.Format, &q.URL, &q.Benutzer,
-			&q.PasswortGesetzt, &q.Fingerabdruck, &q.BildlisteURL, &q.Zeit, &q.Aktiv, &q.Angebote); err != nil {
+			&q.PasswortGesetzt, &q.Fingerabdruck, &q.BildlisteURL, &q.Zeit, &q.Aktiv,
+			&q.BestandURL, &q.BestandIntervall, &q.BestandVon, &q.BestandBis, &q.Angebote); err != nil {
 			return nil, err
 		}
 		liste = append(liste, q)
@@ -171,10 +182,10 @@ func (d *Dienst) LieferantAnlegen(ctx context.Context, kuerzel, name, format str
 func (d *Dienst) quelle(ctx context.Context, kuerzel string) (Quelle, error) {
 	var q Quelle
 	err := d.DB.QueryRowContext(ctx, `SELECT l.id, l.kuerzel, l.name, i.format, i.url, i.benutzer, i.passwort,
-			i.fingerabdruck, i.bildliste_url, i.zeit, i.aktiv
+			i.fingerabdruck, i.bildliste_url, i.zeit, i.aktiv, i.bestand_url, i.bestand_intervall, i.bestand_von, i.bestand_bis
 		FROM lieferanten l JOIN importe i ON i.lieferant_id = l.id WHERE l.kuerzel = $1`, kuerzel).
 		Scan(&q.id, &q.Kuerzel, &q.Name, &q.Format, &q.URL, &q.Benutzer, &q.passwort,
-			&q.Fingerabdruck, &q.BildlisteURL, &q.Zeit, &q.Aktiv)
+			&q.Fingerabdruck, &q.BildlisteURL, &q.Zeit, &q.Aktiv, &q.BestandURL, &q.BestandIntervall, &q.BestandVon, &q.BestandBis)
 	if errors.Is(err, sql.ErrNoRows) {
 		return q, Fehler("Für «" + kuerzel + "» ist kein Import eingerichtet")
 	}
@@ -211,6 +222,25 @@ func (d *Dienst) ImportSpeichern(ctx context.Context, kuerzel string, e Eingabe)
 	if e.Aktiv && (e.Zeit == "" || e.URL == "") {
 		return Fehler("Für den Zeitplan braucht es Adresse und Zeit")
 	}
+	e.BestandURL = strings.TrimSpace(e.BestandURL)
+	if e.BestandURL != "" && !adresseGueltig(e.BestandURL) {
+		return Fehler("Adresse der Lagerbestandsliste muss mit sftp://, ftps://, ftp:// oder https:// beginnen")
+	}
+	if e.BestandVon == "" {
+		e.BestandVon = "07:00"
+	}
+	if e.BestandBis == "" {
+		e.BestandBis = "19:00"
+	}
+	if !zeitMuster.MatchString(e.BestandVon) || !zeitMuster.MatchString(e.BestandBis) || e.BestandVon > e.BestandBis {
+		return Fehler("Lagerbestand: Zeitfenster im Format HH:MM, «von» vor «bis»")
+	}
+	if e.BestandIntervall != 0 && (e.BestandIntervall < 15 || e.BestandIntervall > 1440) {
+		return Fehler("Lagerbestand: Intervall zwischen 15 und 1440 Minuten (0 = aus)")
+	}
+	if e.BestandIntervall > 0 && e.BestandURL == "" {
+		return Fehler("Für den Lagerbestand-Zeitplan braucht es die Adresse der Lagerbestandsliste")
+	}
 	if len(e.Benutzer) > 200 || len(e.Passwort) > 500 || len(e.URL) > 500 || len(e.BildlisteURL) > 500 {
 		return Fehler("Eingabe zu lang")
 	}
@@ -224,15 +254,17 @@ func (d *Dienst) ImportSpeichern(ctx context.Context, kuerzel string, e Eingabe)
 	}
 	passwortSetzen := e.Passwort != "" || e.PasswortLoeschen
 	_, err = d.DB.ExecContext(ctx, `INSERT INTO importe (lieferant_id, format, url, benutzer, passwort,
-			fingerabdruck, bildliste_url, zeit, aktiv)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			fingerabdruck, bildliste_url, zeit, aktiv, bestand_url, bestand_intervall, bestand_von, bestand_bis)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $11, $12, $13, $14)
 		ON CONFLICT (lieferant_id) DO UPDATE SET format = EXCLUDED.format, url = EXCLUDED.url,
 			benutzer = EXCLUDED.benutzer,
 			passwort = CASE WHEN $10 THEN EXCLUDED.passwort ELSE importe.passwort END,
 			fingerabdruck = EXCLUDED.fingerabdruck, bildliste_url = EXCLUDED.bildliste_url,
-			zeit = EXCLUDED.zeit, aktiv = EXCLUDED.aktiv`,
+			zeit = EXCLUDED.zeit, aktiv = EXCLUDED.aktiv, bestand_url = EXCLUDED.bestand_url,
+			bestand_intervall = EXCLUDED.bestand_intervall, bestand_von = EXCLUDED.bestand_von,
+			bestand_bis = EXCLUDED.bestand_bis`,
 		id, e.Format, e.URL, strings.TrimSpace(e.Benutzer), e.Passwort, e.Fingerabdruck, e.BildlisteURL,
-		e.Zeit, e.Aktiv, passwortSetzen)
+		e.Zeit, e.Aktiv, passwortSetzen, e.BestandURL, e.BestandIntervall, e.BestandVon, e.BestandBis)
 	return err
 }
 
@@ -249,8 +281,15 @@ func (d *Dienst) Starten(kuerzel, art string, datei []byte) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if art != "datei" && q.URL == "" {
+	bestandLauf := art == "bestand" || art == "bestand_zeitplan"
+	if bestandLauf && q.BestandURL == "" {
+		return 0, Fehler("Adresse der Lagerbestandsliste fehlt")
+	}
+	if !bestandLauf && art != "datei" && q.URL == "" {
 		return 0, Fehler("Adresse der Preisliste fehlt")
+	}
+	if art == "datei" && IstBestandsliste(datei) {
+		art = "bestand"
 	}
 	d.mu.Lock()
 	if d.laufend[q.id] {
@@ -293,6 +332,24 @@ func (d *Dienst) ausfuehren(q Quelle, id int64, art string, datei []byte) {
 
 	bericht, stand, err := func() (Bericht, time.Time, error) {
 		var stand time.Time
+		if art == "bestand" || art == "bestand_zeitplan" {
+			if datei == nil {
+				d.schritt(id, "Lagerbestandsliste holen")
+				var err error
+				datei, stand, err = Holen(ctx, q.BestandURL, q.Benutzer, q.passwort, q.Fingerabdruck)
+				if err != nil {
+					return Bericht{}, stand, err
+				}
+			}
+			d.schritt(id, "Lagerbestand abgleichen")
+			bestand, err := BestandLesen(datei)
+			datei = nil
+			if err != nil {
+				return Bericht{}, stand, err
+			}
+			b, err := BestandAbgleichen(ctx, d.DB, q.id, bestand)
+			return b, stand, err
+		}
 		if datei == nil {
 			d.schritt(id, "Preisliste holen")
 			var err error
@@ -489,10 +546,12 @@ func (d *Dienst) Zeitplan(ctx context.Context) {
 }
 
 func (d *Dienst) faelligeStarten(ctx context.Context, jetzt time.Time) {
-	rows, err := d.DB.QueryContext(ctx, `SELECT l.kuerzel, i.zeit,
-			(SELECT max(start) FROM import_laeufe lf WHERE lf.lieferant_id = l.id)
+	rows, err := d.DB.QueryContext(ctx, `SELECT l.kuerzel, i.zeit, i.aktiv AND i.zeit <> '' AND i.url <> '',
+			i.bestand_intervall, i.bestand_von, i.bestand_bis, i.bestand_url <> '',
+			(SELECT max(start) FROM import_laeufe lf WHERE lf.lieferant_id = l.id AND lf.art IN ('abruf', 'datei', 'zeitplan')),
+			(SELECT max(start) FROM import_laeufe lf WHERE lf.lieferant_id = l.id AND lf.art IN ('bestand', 'bestand_zeitplan'))
 		FROM importe i JOIN lieferanten l ON l.id = i.lieferant_id
-		WHERE i.aktiv AND l.aktiv AND i.zeit <> '' AND i.url <> ''`)
+		WHERE l.aktiv AND ((i.aktiv AND i.zeit <> '' AND i.url <> '') OR (i.bestand_intervall > 0 AND i.bestand_url <> ''))`)
 	if err != nil {
 		if ctx.Err() == nil {
 			d.Log.Error("zeitplan", "fehler", err)
@@ -500,26 +559,47 @@ func (d *Dienst) faelligeStarten(ctx context.Context, jetzt time.Time) {
 		return
 	}
 	type faellig struct {
-		kuerzel string
-		zeit    string
-		zuletzt *time.Time
+		kuerzel, zeit, von, bis     string
+		voll, bestandAn             bool
+		intervall                   int
+		zuletztVoll, zuletztBestand *time.Time
 	}
 	var liste []faellig
 	for rows.Next() {
 		var f faellig
-		if rows.Scan(&f.kuerzel, &f.zeit, &f.zuletzt) == nil {
+		if rows.Scan(&f.kuerzel, &f.zeit, &f.voll, &f.intervall, &f.von, &f.bis, &f.bestandAn,
+			&f.zuletztVoll, &f.zuletztBestand) == nil {
 			liste = append(liste, f)
 		}
 	}
 	rows.Close()
+	uhr := func(hhmm string) time.Time {
+		h, m := int(hhmm[0]-'0')*10+int(hhmm[1]-'0'), int(hhmm[3]-'0')*10+int(hhmm[4]-'0')
+		return time.Date(jetzt.Year(), jetzt.Month(), jetzt.Day(), h, m, 0, 0, jetzt.Location())
+	}
 	for _, f := range liste {
-		h, m := int(f.zeit[0]-'0')*10+int(f.zeit[1]-'0'), int(f.zeit[3]-'0')*10+int(f.zeit[4]-'0')
-		heute := time.Date(jetzt.Year(), jetzt.Month(), jetzt.Day(), h, m, 0, 0, jetzt.Location())
-		if jetzt.Before(heute) || (f.zuletzt != nil && !f.zuletzt.Before(heute)) {
-			continue
+		// Preisliste: einmal täglich ab der Uhrzeit
+		if f.voll && len(f.zeit) == 5 {
+			heute := uhr(f.zeit)
+			if !jetzt.Before(heute) && (f.zuletztVoll == nil || f.zuletztVoll.Before(heute)) {
+				if _, err := d.Starten(f.kuerzel, "zeitplan", nil); err != nil {
+					d.Log.Warn("zeitplan: start nicht möglich", "lieferant", f.kuerzel, "fehler", err)
+				}
+				continue // Bestand frühestens in der nächsten Minute
+			}
 		}
-		if _, err := d.Starten(f.kuerzel, "zeitplan", nil); err != nil {
-			d.Log.Warn("zeitplan: start nicht möglich", "lieferant", f.kuerzel, "fehler", err)
+		// Lagerbestand: im Zeitfenster alle N Minuten
+		if f.bestandAn && f.intervall > 0 {
+			von, bis := uhr(f.von), uhr(f.bis).Add(time.Minute)
+			if jetzt.Before(von) || !jetzt.Before(bis) {
+				continue
+			}
+			if f.zuletztBestand != nil && jetzt.Sub(*f.zuletztBestand) < time.Duration(f.intervall)*time.Minute-30*time.Second {
+				continue
+			}
+			if _, err := d.Starten(f.kuerzel, "bestand_zeitplan", nil); err != nil {
+				d.Log.Debug("zeitplan bestand: start nicht möglich", "lieferant", f.kuerzel, "fehler", err)
+			}
 		}
 	}
 }

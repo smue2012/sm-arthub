@@ -356,7 +356,7 @@ func TestLast(t *testing.T) {
 	repo := katalog.Repository{DB: db}
 	for _, q := range []string{"artikel 12345", "hersteller 77", "7610000123456", "gibtsnicht"} {
 		t0 := time.Now()
-		liste, _, err := repo.Suche(ctx, q, 50, true)
+		liste, _, err := repo.Suche(ctx, "", q, 50, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -409,5 +409,111 @@ func TestProtokoll(t *testing.T) {
 	AbgleichenMitProtokoll(ctx, db, l, l3, z, nil, time.Time{})
 	if anzahl, _, _ := d.Details(ctx, l3, "", 0); anzahl["wieder"] != 1 || len(anzahl) != 1 {
 		t.Errorf("dritter Lauf: %v", anzahl)
+	}
+}
+
+// Lagerbestandsliste von Competec (Beispiel Stephan, 09.11.2026)
+const bestandsliste = "Nummer 2\tLagerbestand\n723591\t-1\n1649149\t0\n2108613\t17\n1396848\t6\n"
+
+func TestBestandLesen(t *testing.T) {
+	if !IstBestandsliste([]byte(bestandsliste)) || IstBestandsliste(liste(stehsammler)) {
+		t.Fatal("Erkennung Bestandsliste")
+	}
+	b, err := BestandLesen([]byte(bestandsliste))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) != 4 || b["723591"] != 0 || b["2108613"] != 17 {
+		t.Errorf("%v", b)
+	}
+}
+
+func TestBestandAbgleich(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	l := lieferant(t, db, "alltron")
+	z, _, _ := CompetecLesen(liste(stehsammler, brixies, sandwich))
+	if _, err := Abgleichen(ctx, db, l, z, nil, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	vorher := wert[int64](t, db, `SELECT max(stand) FROM artikel`)
+	bestand, _ := BestandLesen([]byte(bestandsliste))
+	b, err := BestandAbgleichen(ctx, db, l, bestand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Brixies 2 → 17 geändert, Stehsammler 6 → 6 gleich, 723591/1649149 unbekannt, Sandwich fehlt → bleibt
+	if b.BestandGeaendert != 1 || b.Unbekannt != 2 {
+		t.Fatalf("%+v", b)
+	}
+	if n := wert[int](t, db, `SELECT lagerbestand FROM angebote WHERE lieferanten_nr = '2108613'`); n != 17 {
+		t.Errorf("Bestand Brixies: %d", n)
+	}
+	if n := wert[int](t, db, `SELECT count(*) FROM artikel WHERE stand > $1`, vorher); n != 1 {
+		t.Errorf("neuer Stand für %d Artikel, erwartet 1", n)
+	}
+	if n := wert[int](t, db, `SELECT count(*) FROM angebote WHERE aktiv`); n != 3 {
+		t.Errorf("Bestandsliste darf nichts deaktivieren: %d aktiv", n)
+	}
+}
+
+func TestBestandZeitplan(t *testing.T) {
+	db := testDB(t)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	d := Neu(ctx, db, slog.New(slog.DiscardHandler))
+	d.LieferantAnlegen(ctx, "alltron", "Alltron", "competec")
+	if err := d.ImportSpeichern(ctx, "alltron", Eingabe{Format: "competec", BestandURL: "sftp://x.invalid/Lager.csv",
+		BestandIntervall: 5}); err == nil {
+		t.Error("Intervall 5 Minuten angenommen")
+	}
+	if err := d.ImportSpeichern(ctx, "alltron", Eingabe{Format: "competec", BestandURL: "sftp://x.invalid/Lager.csv",
+		BestandIntervall: 120, BestandVon: "07:00", BestandBis: "18:00"}); err != nil {
+		t.Fatal(err)
+	}
+	// Datei-Upload der Bestandsliste wird erkannt (ohne Preisliste: alles unbekannt)
+	id, err := d.Starten("alltron", "datei", []byte(bestandsliste))
+	if err != nil {
+		t.Fatal(err)
+	}
+	warten := func(id int64) Lauf {
+		for i := 0; i < 100; i++ {
+			if l, err := d.Lauf(ctx, id); err == nil && l.Status != "laeuft" {
+				return l
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+		t.Fatal("Lauf endet nicht")
+		return Lauf{}
+	}
+	if l := warten(id); l.Art != "bestand" || l.Status != "ok" || l.Bericht.Unbekannt != 4 {
+		t.Fatalf("Upload Bestandsliste: %+v %+v", l, l.Bericht)
+	}
+	laeufe := func() int {
+		return wert[int](t, db, `SELECT count(*) FROM import_laeufe WHERE art = 'bestand_zeitplan'`)
+	}
+	tag := time.Now().AddDate(0, 0, 1)
+	um := func(h, m int) time.Time { return time.Date(tag.Year(), tag.Month(), tag.Day(), h, m, 0, 0, time.Local) }
+	d.faelligeStarten(ctx, um(6, 30)) // vor dem Fenster
+	time.Sleep(100 * time.Millisecond)
+	if n := laeufe(); n != 0 {
+		t.Fatalf("vor 07:00 gestartet: %d", n)
+	}
+	d.faelligeStarten(ctx, um(7, 0)) // Fenster offen, Intervall seit Upload vorbei (morgen)
+	time.Sleep(200 * time.Millisecond)
+	if n := laeufe(); n != 1 {
+		t.Fatalf("um 07:00: %d Läufe", n)
+	}
+	// Der Lauf von «morgen 07:00» liegt in der Zukunft der Datenbank: Start künstlich setzen
+	db.Exec(`UPDATE import_laeufe SET start = $1 WHERE art = 'bestand_zeitplan'`, um(7, 0))
+	d.faelligeStarten(ctx, um(8, 0)) // erst 60 von 120 Minuten
+	time.Sleep(100 * time.Millisecond)
+	if n := laeufe(); n != 1 {
+		t.Fatalf("nach 60 Minuten nochmals gestartet: %d", n)
+	}
+	d.faelligeStarten(ctx, um(18, 30)) // nach dem Fenster
+	time.Sleep(100 * time.Millisecond)
+	if n := laeufe(); n != 1 {
+		t.Fatalf("nach 18:00 gestartet: %d", n)
 	}
 }
