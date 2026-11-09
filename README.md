@@ -70,7 +70,12 @@ Erneutes `anlegen` für dieselbe App ersetzt den alten Schlüssel.
 
 1. Im Stack die Variablen `ARTHUB_DB_PASSWORT` (frei wählen) und optional
    `ARTHUB_VERSION` setzen
-2. Der Stack legt das Netz `arthub` selbst an
+2. Der Stack legt das Netz `arthub` selbst an. Beide Netze haben feste
+   Subnetze (`ARTHUB_NETZ_INTERN`, Vorgabe `10.250.250.0/28`, und
+   `ARTHUB_NETZ`, Vorgabe `10.250.250.16/28`), weil die Standard-Adresspools
+   von Docker aufgebraucht sein können («all predefined address pools have
+   been fully subnetted»). Überschneidet sich das mit dem LAN oder einem VPN,
+   andere Subnetze setzen.
 3. Die Stacks der Apps hängen sich als externes Netz `arthub` daran und
    erreichen den Hub unter `http://sm-arthub:8110`
 
