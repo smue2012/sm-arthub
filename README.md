@@ -32,6 +32,11 @@ Unbekannte Parameter werden abgelehnt (400). Geändert wird nur rückwärtskompa
 | `GET /api/v1/lieferanten` | `{lieferanten}` |
 | `GET /health` | `ok` (ohne Schlüssel, für Docker) |
 
+Artikelnummern: `AH` + 7 Ziffern + Luhn-Prüfziffer, z.B. `AH00000018` (bis 9,9 Mio. Artikel).
+Die Nummer ist eindeutig, ändert sich nie (auch nicht, wenn das beste Angebot den Lieferanten
+wechselt) und dient als SelectLine-Artikelnummer; die Prüfziffer erkennt Tippfehler.
+Prüfen in Go: `katalog.NummerGueltig`.
+
 Ein Artikel enthält die Stammdaten, `bestes` (das massgebende Angebot oder
 `null`) und `angebote` (alle aktiven, sortiert nach der Bestpreis-Regel).
 Der EK kommt als Text (`"12.5000"`), damit nichts gerundet wird.

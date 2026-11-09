@@ -124,8 +124,13 @@ func TestBestpreis(t *testing.T) {
 	if liste[3].Angebote == nil || len(liste[3].Angebote) != 0 {
 		t.Errorf("Leer: angebote %v", liste[3].Angebote)
 	}
-	if liste[0].Nummer != "AH0000001" {
-		t.Errorf("nummer %q", liste[0].Nummer)
+	if liste[0].Nummer != "AH00000018" || liste[1].Nummer != "AH00000026" {
+		t.Errorf("nummern %q %q", liste[0].Nummer, liste[1].Nummer)
+	}
+	for _, a := range liste {
+		if !katalog.NummerGueltig(a.Nummer) {
+			t.Errorf("Prüfziffer aus der Datenbank passt nicht zu Go: %s", a.Nummer)
+		}
 	}
 }
 
