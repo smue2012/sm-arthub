@@ -28,6 +28,7 @@ Unbekannte Parameter werden abgelehnt (400). Geändert wird nur rückwärtskompa
 | --- | --- |
 | `GET /api/v1/artikel?seit=<stand>&limit=<n>` | `{artikel, stand, mehr}` – Delta-Abgleich, `limit` 1–2000 (Vorgabe 500) |
 | `GET /api/v1/artikel/{nummer}` | ein Artikel, 404 wenn unbekannt |
+| `GET /api/v1/suche?q=<wörter>&limit=<n>&verfuegbar=1` | `{artikel, mehr}` – aktive Artikel, in denen jedes Wort vorkommt (Bezeichnung, Beschreibung, Hersteller, Herstellernummer, EAN, Hub-Nummer, Lieferanten-Artikelnummer); `limit` 1–200 (Vorgabe 50), `verfuegbar=1` nur an Lager |
 | `GET /api/v1/lieferanten` | `{lieferanten}` |
 | `GET /health` | `ok` (ohne Schlüssel, für Docker) |
 

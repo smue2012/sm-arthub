@@ -10,6 +10,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -72,6 +75,9 @@ type Repository struct {
 const artikelSpalten = `id, nummer, art, bezeichnung, beschreibung, hersteller, hersteller_nr,
 	ean, kategorie, gewicht_g, laenge_mm, breite_mm, hoehe_mm, aktiv, stand, geaendert`
 
+const artikelSpaltenA = `a.id, a.nummer, a.art, a.bezeichnung, a.beschreibung, a.hersteller, a.hersteller_nr,
+	a.ean, a.kategorie, a.gewicht_g, a.laenge_mm, a.breite_mm, a.hoehe_mm, a.aktiv, a.stand, a.geaendert`
+
 func scanArtikel(s interface{ Scan(...any) error }) (Artikel, error) {
 	var a Artikel
 	err := s.Scan(&a.id, &a.Nummer, &a.Art, &a.Bezeichnung, &a.Beschreibung, &a.Hersteller,
@@ -123,6 +129,65 @@ func (r Repository) Nummer(ctx context.Context, nummer string) (Artikel, error) 
 		return Artikel{}, err
 	}
 	return liste[0], nil
+}
+
+// Suche findet aktive Artikel, in denen jedes Wort von q vorkommt (Bezeichnung,
+// Beschreibung, Hersteller, Herstellernummer, EAN, Hub-Nummer oder
+// Lieferanten-Artikelnummer). nurVerfuegbar: nur Artikel mit einem Angebot an
+// Lager. Sortiert nach Bezeichnung; mehr = es gäbe weitere Treffer.
+func (r Repository) Suche(ctx context.Context, q string, limit int, nurVerfuegbar bool) (liste []Artikel, mehr bool, err error) {
+	woerter := strings.Fields(q)
+	if len(woerter) == 0 {
+		return []Artikel{}, false, nil
+	}
+	if len(woerter) > 8 {
+		woerter = woerter[:8]
+	}
+	var bed []string
+	args := []any{}
+	for _, w := range woerter {
+		args = append(args, "%"+likeMaskieren(w)+"%")
+		n := len(args)
+		bed = append(bed, fmt.Sprintf(`(a.bezeichnung ILIKE $%[1]d OR a.beschreibung ILIKE $%[1]d
+			OR a.hersteller ILIKE $%[1]d OR a.hersteller_nr ILIKE $%[1]d OR a.ean ILIKE $%[1]d
+			OR a.nummer ILIKE $%[1]d OR EXISTS (SELECT 1 FROM angebote x
+				WHERE x.artikel_id = a.id AND x.lieferanten_nr ILIKE $%[1]d))`, n))
+	}
+	if nurVerfuegbar {
+		bed = append(bed, `EXISTS (SELECT 1 FROM angebote v JOIN lieferanten vl ON vl.id = v.lieferant_id AND vl.aktiv
+			WHERE v.artikel_id = a.id AND v.aktiv AND v.lagerbestand > 0)`)
+	}
+	args = append(args, limit+1)
+	rows, err := r.DB.QueryContext(ctx, `SELECT `+artikelSpaltenA+` FROM artikel a
+		WHERE a.aktiv AND `+strings.Join(bed, " AND ")+`
+		ORDER BY a.bezeichnung, a.nummer LIMIT $`+strconv.Itoa(len(args)), args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	liste = []Artikel{}
+	for rows.Next() {
+		a, err := scanArtikel(rows)
+		if err != nil {
+			return nil, false, err
+		}
+		liste = append(liste, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(liste) > limit {
+		liste, mehr = liste[:limit], true
+	}
+	if err := r.angeboteLaden(ctx, liste); err != nil {
+		return nil, false, err
+	}
+	return liste, mehr, nil
+}
+
+// likeMaskieren: % und _ im Suchbegriff wörtlich nehmen.
+func likeMaskieren(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(s)
 }
 
 // Lieferanten liefert alle Lieferanten.

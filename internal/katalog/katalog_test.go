@@ -213,3 +213,56 @@ func TestSchluessel(t *testing.T) {
 		t.Fatalf("neuer Schlüssel: %v", err)
 	}
 }
+
+func TestSuche(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	r := katalog.Repository{DB: db}
+	l := muss(t, db, `INSERT INTO lieferanten (kuerzel, name) VALUES ('alltron', 'Alltron')`)
+	maus := muss(t, db, `INSERT INTO artikel (bezeichnung, hersteller, hersteller_nr, ean)
+		VALUES ('MX Master 3S Maus', 'Logitech', '910-006559', '5099206103904')`)
+	muss(t, db, `INSERT INTO angebote (artikel_id, lieferant_id, lieferanten_nr, ek, lagerbestand)
+		VALUES ($1, $2, 'ALL-4711', 79.9, 5)`, maus, l)
+	tast := muss(t, db, `INSERT INTO artikel (bezeichnung, hersteller) VALUES ('MX Keys Tastatur 100%', 'Logitech')`)
+	muss(t, db, `INSERT INTO angebote (artikel_id, lieferant_id, lieferanten_nr, ek, lagerbestand)
+		VALUES ($1, $2, 'ALL-4712', 99, 0)`, tast, l)
+	muss(t, db, `INSERT INTO artikel (bezeichnung, hersteller, aktiv) VALUES ('Alte Maus', 'Logitech', false)`)
+
+	treffer := func(q string, verf bool) []string {
+		t.Helper()
+		liste, _, err := r.Suche(ctx, q, 10, verf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var namen []string
+		for _, a := range liste {
+			namen = append(namen, a.Bezeichnung)
+		}
+		return namen
+	}
+	if n := treffer("logitech", false); len(n) != 2 {
+		t.Errorf("logitech: %v (inaktive dürfen nicht kommen)", n)
+	}
+	if n := treffer("logitech maus", false); len(n) != 1 || n[0] != "MX Master 3S Maus" {
+		t.Errorf("logitech maus: %v", n)
+	}
+	if n := treffer("ALL-4712", false); len(n) != 1 {
+		t.Errorf("lieferanten-nr: %v", n)
+	}
+	if n := treffer("5099206103904", false); len(n) != 1 {
+		t.Errorf("ean: %v", n)
+	}
+	if n := treffer("logitech", true); len(n) != 1 || n[0] != "MX Master 3S Maus" {
+		t.Errorf("nur verfügbar: %v", n)
+	}
+	if n := treffer("100%", false); len(n) != 1 {
+		t.Errorf("prozent wörtlich: %v", n)
+	}
+	if n := treffer("10_%", false); len(n) != 0 {
+		t.Errorf("_ und %% wörtlich: %v", n)
+	}
+	liste, mehr, _ := r.Suche(ctx, "mx", 1, false)
+	if len(liste) != 1 || !mehr || liste[0].Bestes == nil {
+		t.Errorf("limit/mehr: %d %v", len(liste), mehr)
+	}
+}

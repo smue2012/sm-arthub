@@ -14,9 +14,11 @@ import (
 )
 
 type fakeKatalog struct {
-	seit, limit int64
-	artikel     []katalog.Artikel
-	mehr        bool
+	seit, limit   int64
+	artikel       []katalog.Artikel
+	mehr          bool
+	q             string
+	nurVerfuegbar bool
 }
 
 func (f *fakeKatalog) Seit(_ context.Context, seit int64, limit int) ([]katalog.Artikel, bool, error) {
@@ -31,6 +33,11 @@ func (f *fakeKatalog) Nummer(_ context.Context, nummer string) (katalog.Artikel,
 		}
 	}
 	return katalog.Artikel{}, katalog.ErrNichtGefunden
+}
+
+func (f *fakeKatalog) Suche(_ context.Context, q string, limit int, nurVerfuegbar bool) ([]katalog.Artikel, bool, error) {
+	f.q, f.nurVerfuegbar, f.limit = q, nurVerfuegbar, int64(limit)
+	return f.artikel, f.mehr, nil
 }
 
 func (f *fakeKatalog) Lieferanten(context.Context) ([]katalog.Lieferant, error) {
@@ -107,5 +114,26 @@ func TestArtikelNummer(t *testing.T) {
 	}
 	if code, _ := aufruf(t, h, "/api/v1/artikel/AH9999999", "ah_gut"); code != 404 {
 		t.Fatalf("fehlt: %d", code)
+	}
+}
+
+func TestSuche(t *testing.T) {
+	k := &fakeKatalog{artikel: []katalog.Artikel{{Nummer: "AH0000001"}}}
+	h := Handler(k, fakePruefer{}, slog.New(slog.DiscardHandler))
+	code, body := aufruf(t, h, "/api/v1/suche?q=+logitech+maus+&verfuegbar=1&limit=10", "ah_gut")
+	if code != 200 || k.q != "logitech maus" || !k.nurVerfuegbar || k.limit != 10 {
+		t.Fatalf("code %d q=%q verf=%v limit=%d", code, k.q, k.nurVerfuegbar, k.limit)
+	}
+	if len(body["artikel"].([]any)) != 1 {
+		t.Fatalf("antwort %v", body)
+	}
+	for _, pfad := range []string{"/api/v1/suche", "/api/v1/suche?q=a", "/api/v1/suche?q=ab&limit=500",
+		"/api/v1/suche?q=ab&verfuegbar=ja", "/api/v1/suche?q=ab&x=1"} {
+		if code, _ := aufruf(t, h, pfad, "ah_gut"); code != 400 {
+			t.Errorf("%s: %d, erwartet 400", pfad, code)
+		}
+	}
+	if code, _ := aufruf(t, h, "/api/v1/suche?q=ab", ""); code != 401 {
+		t.Errorf("ohne Schlüssel: %d", code)
 	}
 }

@@ -5,6 +5,7 @@
 //
 //	GET /api/v1/artikel?seit=<stand>&limit=<n>   Delta-Abgleich
 //	GET /api/v1/artikel/{nummer}                 ein Artikel
+//	GET /api/v1/suche?q=<wörter>&limit=<n>&verfuegbar=1   Suche (aktive Artikel)
 //	GET /api/v1/lieferanten                      Quellen
 //	GET /health                                  ohne Schlüssel, nur «ok»
 package api
@@ -32,6 +33,7 @@ const (
 type Katalog interface {
 	Seit(ctx context.Context, seit int64, limit int) ([]katalog.Artikel, bool, error)
 	Nummer(ctx context.Context, nummer string) (katalog.Artikel, error)
+	Suche(ctx context.Context, q string, limit int, nurVerfuegbar bool) ([]katalog.Artikel, bool, error)
 	Lieferanten(ctx context.Context) ([]katalog.Lieferant, error)
 }
 
@@ -55,6 +57,7 @@ func Handler(k Katalog, p Pruefer, log *slog.Logger) http.Handler {
 	v1 := http.NewServeMux()
 	v1.HandleFunc("GET /api/v1/artikel", h.artikelSeit)
 	v1.HandleFunc("GET /api/v1/artikel/{nummer}", h.artikel)
+	v1.HandleFunc("GET /api/v1/suche", h.suche)
 	v1.HandleFunc("GET /api/v1/lieferanten", h.lieferanten)
 
 	mux := http.NewServeMux()
@@ -165,6 +168,52 @@ func (h handler) artikel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json200(w, a)
+}
+
+// Suchlimits: Vorgabe 50, höchstens 200 Treffer.
+const (
+	SucheStandard = 50
+	SucheMax      = 200
+)
+
+func (h handler) suche(w http.ResponseWriter, r *http.Request) {
+	if !nurParameter(w, r, "q", "limit", "verfuegbar") {
+		return
+	}
+	q := r.URL.Query()
+	text := strings.TrimSpace(q.Get("q"))
+	if len([]rune(text)) < 2 {
+		fehler(w, http.StatusBadRequest, "q: mindestens 2 Zeichen")
+		return
+	}
+	if len(text) > 200 {
+		fehler(w, http.StatusBadRequest, "q: höchstens 200 Zeichen")
+		return
+	}
+	limit := SucheStandard
+	if s := q.Get("limit"); s != "" {
+		v, err := strconv.Atoi(s)
+		if err != nil || v < 1 || v > SucheMax {
+			fehler(w, http.StatusBadRequest, "limit muss zwischen 1 und "+strconv.Itoa(SucheMax)+" liegen")
+			return
+		}
+		limit = v
+	}
+	nurVerfuegbar := false
+	switch q.Get("verfuegbar") {
+	case "", "0":
+	case "1":
+		nurVerfuegbar = true
+	default:
+		fehler(w, http.StatusBadRequest, "verfuegbar: 0 oder 1")
+		return
+	}
+	liste, mehr, err := h.k.Suche(r.Context(), text, limit, nurVerfuegbar)
+	if err != nil {
+		h.serverfehler(w, r, err)
+		return
+	}
+	json200(w, map[string]any{"artikel": liste, "mehr": mehr})
 }
 
 func (h handler) lieferanten(w http.ResponseWriter, r *http.Request) {
