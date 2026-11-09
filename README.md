@@ -78,7 +78,9 @@ Notfall ohne Oberfläche (Portainer: Container → Console, `/bin/bash`):
 `docker-compose.yml` als Stack in Portainer (Stacks → Add stack):
 
 1. Im Stack die Variablen `ARTHUB_DB_PASSWORT` und `ARTHUB_ADMIN_PASSWORT`
-   (beide frei wählen) und optional `ARTHUB_VERSION`, `ARTHUB_ADMIN_PORT` setzen
+   (beide frei wählen) und optional `ARTHUB_VERSION`, `ARTHUB_ADMIN_PORT` setzen.
+   Passwörter ohne `$` wählen oder jedes `$` als `$$` schreiben – Compose liest
+   `$` als Variable, sonst kommt ein anderes Passwort im Container an.
 2. Der Stack legt das Netz `arthub` selbst an. Beide Netze haben feste
    Subnetze (`ARTHUB_NETZ_INTERN`, Vorgabe `10.250.250.0/28`, und
    `ARTHUB_NETZ`, Vorgabe `10.250.250.16/28`), weil die Standard-Adresspools
