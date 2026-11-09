@@ -146,10 +146,8 @@ func (r Repository) Suche(ctx context.Context, q string, limit int, nurVerfuegba
 	args := []any{}
 	for _, w := range woerter {
 		args = append(args, "%"+likeMaskieren(strings.ToLower(w))+"%")
-		n := len(args)
-		// suchtext und lieferanten_nr haben Trigramm-Indizes (Migration 004)
-		bed = append(bed, fmt.Sprintf(`(a.suchtext LIKE $%[1]d OR a.id IN (SELECT x.artikel_id FROM angebote x
-				WHERE x.lieferanten_nr ILIKE $%[1]d))`, n))
+		// artikel_suche hat einen Trigramm-Index (Migration 006)
+		bed = append(bed, fmt.Sprintf(`s.suchtext LIKE $%d`, len(args)))
 	}
 	if nurVerfuegbar {
 		bed = append(bed, `EXISTS (SELECT 1 FROM angebote v JOIN lieferanten vl ON vl.id = v.lieferant_id AND vl.aktiv
@@ -157,6 +155,7 @@ func (r Repository) Suche(ctx context.Context, q string, limit int, nurVerfuegba
 	}
 	args = append(args, limit+1)
 	rows, err := r.DB.QueryContext(ctx, `SELECT `+artikelSpaltenA+` FROM artikel a
+		JOIN artikel_suche s ON s.artikel_id = a.id
 		WHERE a.aktiv AND `+strings.Join(bed, " AND ")+`
 		ORDER BY a.bezeichnung, a.nummer LIMIT $`+strconv.Itoa(len(args)), args...)
 	if err != nil {

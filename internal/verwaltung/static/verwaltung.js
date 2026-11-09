@@ -121,7 +121,11 @@ function laufText(l) {
   const teile = [`${zahl(b.zeilen)} Zeilen`];
   if (b.artikel_neu) teile.push(`${zahl(b.artikel_neu)} Artikel neu`);
   if (b.zugeordnet) teile.push(`${zahl(b.zugeordnet)} bestehenden zugeordnet`);
-  if (b.angebote_geaendert) teile.push(`${zahl(b.angebote_geaendert)} Preise/Bestände geändert`);
+  if (b.preise_geaendert != null) {
+    if (b.preise_geaendert) teile.push(`${zahl(b.preise_geaendert)} EK geändert`);
+    if (b.bestand_geaendert) teile.push(`${zahl(b.bestand_geaendert)} Bestände geändert`);
+    if (b.reaktiviert) teile.push(`${zahl(b.reaktiviert)} wieder gelistet`);
+  } else if (b.angebote_geaendert) teile.push(`${zahl(b.angebote_geaendert)} Preise/Bestände geändert`);
   if (b.stammdaten_geaendert) teile.push(`${zahl(b.stammdaten_geaendert)} Stammdaten geändert`);
   if (b.deaktiviert) teile.push(`${zahl(b.deaktiviert)} nicht mehr gelistet`);
   if (b.bilder_geaendert) teile.push(`${zahl(b.bilder_geaendert)} Bilder`);
@@ -139,6 +143,12 @@ async function laeufeLaden() {
   for (const l of laeufe) {
     const tr = document.createElement("tr");
     const zellen = [datum(l.start), l.lieferant, ART[l.art] || l.art, STATUS[l.status] || l.status, laufText(l)];
+    if (l.status === "ok") {
+      tr.tabIndex = 0;
+      tr.title = "Protokoll anzeigen";
+      tr.addEventListener("click", () => protokollOeffnen(l));
+      tr.addEventListener("keydown", (e) => { if (e.key === "Enter") protokollOeffnen(l); });
+    }
     zellen.forEach((t, i) => {
       const td = document.createElement("td");
       td.textContent = t;
@@ -159,6 +169,90 @@ async function laeufeLaden() {
     standAktualisieren().catch(() => {});
   }
   laeufeLaden.lief = laeufe.some((l) => l.status === "laeuft");
+}
+
+// ---------- Protokoll eines Laufs ----------
+let protokollLauf = null, protokollArt = "";
+
+async function protokollOeffnen(l) {
+  protokollLauf = l;
+  protokollArt = "";
+  $("pr-titel").textContent = `Importprotokoll ${l.lieferant} · ${datum(l.start)}`;
+  $("pr-zusammenfassung").textContent = laufText(l);
+  $("protokoll").showModal();
+  await protokollLaden();
+}
+
+async function protokollLaden() {
+  const art = protokollArt ? `?art=${encodeURIComponent(protokollArt)}` : "";
+  $("pr-zeilen").replaceChildren();
+  meldung($("pr-leer"), "Lade …");
+  let d;
+  try {
+    d = await api(`/api/laeufe/${protokollLauf.id}/details${art}`);
+  } catch (e) {
+    if (e.status === 401) { $("protokoll").close(); anmeldungZeigen(); return; }
+    meldung($("pr-leer"), e.message);
+    return;
+  }
+  const gesamt = d.arten.reduce((s, a) => s + a.anzahl, 0);
+  const knoepfe = [{ art: "", text: "Alle", anzahl: gesamt }, ...d.arten].map((a) => {
+    const k = document.createElement("button");
+    k.type = "button";
+    k.setAttribute("role", "tab");
+    k.setAttribute("aria-selected", String(a.art === protokollArt));
+    k.textContent = `${a.text} (${zahl(a.anzahl)})`;
+    k.disabled = !a.anzahl && a.art !== "";
+    k.addEventListener("click", () => { protokollArt = a.art; protokollLaden(); });
+    return k;
+  });
+  $("pr-arten").replaceChildren(...knoepfe);
+
+  const texte = Object.fromEntries(d.arten.map((a) => [a.art, a.text]));
+  for (const x of d.details) {
+    const tr = document.createElement("tr");
+    // Beträge «22.5000» als «22.50» (mehr Stellen nur, wenn sie zählen)
+    const betrag = (v) => (/^\d+\.\d{4}$/.test(v) ? v.replace(/(\.\d\d\d*?)0+$/, "$1") : v);
+    const zellen = [x.lieferanten_nr, x.artikel_nummer, x.bezeichnung, betrag(x.alt), betrag(x.neu)];
+    zellen.forEach((t, i) => {
+      const td = document.createElement("td");
+      td.textContent = t;
+      if (i < 2) td.className = "mono";
+      if (i >= 3) td.className = "r";
+      if (i === 2 && !protokollArt) td.title = texte[x.art] || x.art;
+      tr.append(td);
+    });
+    if (!protokollArt) {
+      const art = document.createElement("div");
+      art.className = "ergebnis-text";
+      art.textContent = texte[x.art] || x.art;
+      tr.children[2].append(art);
+    }
+    $("pr-zeilen").append(tr);
+  }
+  const anzahl = protokollArt ? (d.arten.find((a) => a.art === protokollArt) || {}).anzahl : gesamt;
+  meldung($("pr-leer"), d.details.length ? "" :
+    "Keine Einträge. Reine Bestandsänderungen werden nur gezählt; Protokolle älter als 90 Tage sind gelöscht.");
+  $("pr-hinweis").textContent = anzahl > d.details.length ? `Angezeigt: ${zahl(d.details.length)} von ${zahl(anzahl)} – alle in der CSV-Datei.` : "";
+}
+
+async function protokollCSV() {
+  const art = protokollArt ? `?art=${encodeURIComponent(protokollArt)}` : "";
+  const knopf = $("pr-csv");
+  knopf.disabled = true;
+  try {
+    const antwort = await fetch(`/api/laeufe/${protokollLauf.id}/details.csv${art}`, { headers: { "X-Arthub": "1" }, credentials: "same-origin" });
+    if (!antwort.ok) throw new Error(`Fehler ${antwort.status}`);
+    const name = ((antwort.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "importprotokoll.csv";
+    const url = URL.createObjectURL(await antwort.blob());
+    const a = document.createElement("a");
+    a.href = url; a.download = name; document.body.append(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  } catch (e) {
+    $("pr-hinweis").textContent = e.message;
+  } finally {
+    knopf.disabled = false;
+  }
 }
 
 function standText(q) {
@@ -311,6 +405,8 @@ function lieferantFormular(q) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  $("pr-zu").addEventListener("click", () => $("protokoll").close());
+  $("pr-csv").addEventListener("click", protokollCSV);
   $("lief-neu-knopf").addEventListener("click", () => {
     zeigen($("lief-neu"), true);
     $("ln-kuerzel").focus();

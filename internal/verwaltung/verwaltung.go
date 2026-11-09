@@ -14,13 +14,17 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/base64"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,6 +67,8 @@ type Importe interface {
 	Fingerabdruck(ctx context.Context, adresse string) (string, string, error)
 	Starten(kuerzel, art string, datei []byte) (int64, error)
 	Laeufe(ctx context.Context, kuerzel string, limit int) ([]importer.Lauf, error)
+	Lauf(ctx context.Context, id int64) (importer.Lauf, error)
+	Details(ctx context.Context, laufID int64, art string, limit int) (map[string]int, []importer.Detail, error)
 }
 
 // Optionen der Oberfläche.
@@ -110,6 +116,8 @@ func Handler(opt Optionen) http.Handler {
 		api.Handle("POST /api/lieferanten/{kuerzel}/importieren", s.nurAngemeldet(s.importieren))
 		api.Handle("POST /api/lieferanten/{kuerzel}/hochladen", s.nurAngemeldet(s.hochladen))
 		api.Handle("GET /api/laeufe", s.nurAngemeldet(s.laeufe))
+		api.Handle("GET /api/laeufe/{id}/details", s.nurAngemeldet(s.details))
+		api.Handle("GET /api/laeufe/{id}/details.csv", s.nurAngemeldet(s.detailsCSV))
 	}
 
 	mux := http.NewServeMux()
@@ -391,6 +399,91 @@ func (s *server) laeufe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonAntwort(w, http.StatusOK, map[string]any{"laeufe": liste})
+}
+
+// laufUndArt liest Lauf-ID und Art aus der Anfrage.
+func (s *server) laufUndArt(w http.ResponseWriter, r *http.Request) (importer.Lauf, string, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		fehler(w, http.StatusBadRequest, "ungültige Lauf-Nummer")
+		return importer.Lauf{}, "", false
+	}
+	art := r.URL.Query().Get("art")
+	if art != "" {
+		ok := false
+		for _, a := range importer.DetailArten {
+			ok = ok || a.Art == art
+		}
+		if !ok {
+			fehler(w, http.StatusBadRequest, "unbekannte Art")
+			return importer.Lauf{}, "", false
+		}
+	}
+	lauf, err := s.opt.Importe.Lauf(r.Context(), id)
+	if err != nil {
+		s.importFehler(w, err)
+		return importer.Lauf{}, "", false
+	}
+	return lauf, art, true
+}
+
+// MaxDetailsAnzeige: so viele Zeilen zeigt die Oberfläche, alle gibt es als CSV.
+const MaxDetailsAnzeige = 500
+
+func (s *server) details(w http.ResponseWriter, r *http.Request) {
+	lauf, art, ok := s.laufUndArt(w, r)
+	if !ok {
+		return
+	}
+	anzahl, liste, err := s.opt.Importe.Details(r.Context(), lauf.ID, art, MaxDetailsAnzeige)
+	if err != nil {
+		s.serverfehler(w, err)
+		return
+	}
+	arten := []map[string]any{}
+	for _, a := range importer.DetailArten {
+		arten = append(arten, map[string]any{"art": a.Art, "text": a.Text, "anzahl": anzahl[a.Art]})
+	}
+	jsonAntwort(w, http.StatusOK, map[string]any{"lauf": lauf, "arten": arten, "details": liste, "max": MaxDetailsAnzeige})
+}
+
+func (s *server) detailsCSV(w http.ResponseWriter, r *http.Request) {
+	lauf, art, ok := s.laufUndArt(w, r)
+	if !ok {
+		return
+	}
+	_, liste, err := s.opt.Importe.Details(r.Context(), lauf.ID, art, 0)
+	if err != nil {
+		s.serverfehler(w, err)
+		return
+	}
+	texte := map[string]string{}
+	for _, a := range importer.DetailArten {
+		texte[a.Art] = a.Text
+	}
+	name := fmt.Sprintf("import-%s-%s-%d", lauf.Lieferant, lauf.Start.Local().Format("2006-01-02"), lauf.ID)
+	if art != "" {
+		name += "-" + art
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`.csv"`)
+	w.Write([]byte("\xef\xbb\xbf")) // BOM, damit Excel UTF-8 erkennt
+	c := csv.NewWriter(w)
+	c.Comma = ';'
+	c.Write([]string{"Art", "Lieferanten-Nr.", "Artikelnummer", "Bezeichnung", "Alt", "Neu"})
+	for _, d := range liste {
+		c.Write([]string{texte[d.Art], csvSicher(d.LieferantenNr), csvSicher(d.ArtikelNummer), csvSicher(d.Bezeichnung),
+			csvSicher(d.Alt), csvSicher(d.Neu)})
+	}
+	c.Flush()
+}
+
+// csvSicher verhindert, dass Excel einen Text als Formel ausführt.
+func csvSicher(s string) string {
+	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
+		return "'" + s
+	}
+	return s
 }
 
 func (s *server) serverfehler(w http.ResponseWriter, err error) {

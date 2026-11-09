@@ -285,6 +285,11 @@ func (d *Dienst) ausfuehren(q Quelle, id int64, art string, datei []byte) {
 	ctx := d.ctx
 	log := d.Log.With("lieferant", q.Kuerzel, "lauf", id)
 	log.Info("import gestartet", "art", art)
+	// Protokoll-Details nach 90 Tagen löschen (die Zusammenfassung bleibt)
+	if _, err := d.DB.ExecContext(ctx, `DELETE FROM import_details WHERE lauf_id IN
+		(SELECT id FROM import_laeufe WHERE start < now() - interval '90 days')`); err != nil {
+		log.Warn("alte protokolle löschen", "fehler", err)
+	}
 
 	bericht, stand, err := func() (Bericht, time.Time, error) {
 		var stand time.Time
@@ -315,7 +320,7 @@ func (d *Dienst) ausfuehren(q Quelle, id int64, art string, datei []byte) {
 			}
 		}
 		d.schritt(id, "Abgleich mit dem Katalog")
-		b, err := Abgleichen(ctx, d.DB, q.id, zeilen, bilder, stand)
+		b, err := AbgleichenMitProtokoll(ctx, d.DB, q.id, id, zeilen, bilder, stand)
 		b.Uebersprungen = uebersprungen
 		b.Hinweise = append(hinweise, b.Hinweise...)
 		return b, stand, err
@@ -352,6 +357,10 @@ func (d *Dienst) laeufe(ctx context.Context, lieferantID int, limit int) ([]Lauf
 	if err != nil {
 		return nil, err
 	}
+	return laeufeLesen(rows)
+}
+
+func laeufeLesen(rows *sql.Rows) ([]Lauf, error) {
 	defer rows.Close()
 	liste := []Lauf{}
 	for rows.Next() {
@@ -370,6 +379,84 @@ func (d *Dienst) laeufe(ctx context.Context, lieferantID int, limit int) ([]Lauf
 		liste = append(liste, l)
 	}
 	return liste, rows.Err()
+}
+
+// Detail: eine Zeile des Protokolls eines Laufs.
+type Detail struct {
+	Art           string `json:"art"`
+	LieferantenNr string `json:"lieferanten_nr"`
+	ArtikelNummer string `json:"artikel_nummer"`
+	Bezeichnung   string `json:"bezeichnung"`
+	Alt           string `json:"alt"`
+	Neu           string `json:"neu"`
+}
+
+// DetailArten in der Reihenfolge der Anzeige, mit Bezeichnung.
+var DetailArten = []struct{ Art, Text string }{
+	{"artikel_neu", "Neue Artikel"}, {"zugeordnet", "Bestehenden Artikeln zugeordnet"},
+	{"preis", "EK geändert"}, {"stammdaten", "Stammdaten geändert"},
+	{"entfernt", "Nicht mehr gelistet"}, {"wieder", "Wieder gelistet"},
+}
+
+// Details liefert das Protokoll eines Laufs: Anzahl je Art und die Zeilen einer
+// Art (art leer = alle), höchstens limit (0 = alle).
+func (d *Dienst) Details(ctx context.Context, laufID int64, art string, limit int) (map[string]int, []Detail, error) {
+	anzahl := map[string]int{}
+	rows, err := d.DB.QueryContext(ctx, `SELECT art, count(*) FROM import_details WHERE lauf_id = $1 GROUP BY art`, laufID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for rows.Next() {
+		var a string
+		var n int
+		if err := rows.Scan(&a, &n); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		anzahl[a] = n
+	}
+	rows.Close()
+	q := `SELECT art, lieferanten_nr, artikel_nummer, bezeichnung, alt, neu FROM import_details
+		WHERE lauf_id = $1 AND ($2 = '' OR art = $2)
+		ORDER BY CASE art WHEN 'artikel_neu' THEN 1 WHEN 'zugeordnet' THEN 2 WHEN 'preis' THEN 3
+			WHEN 'stammdaten' THEN 4 WHEN 'entfernt' THEN 5 ELSE 6 END, bezeichnung, lieferanten_nr`
+	args := []any{laufID, art}
+	if limit > 0 {
+		q += ` LIMIT $3`
+		args = append(args, limit)
+	}
+	rows, err = d.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	liste := []Detail{}
+	for rows.Next() {
+		var x Detail
+		if err := rows.Scan(&x.Art, &x.LieferantenNr, &x.ArtikelNummer, &x.Bezeichnung, &x.Alt, &x.Neu); err != nil {
+			return nil, nil, err
+		}
+		liste = append(liste, x)
+	}
+	return anzahl, liste, rows.Err()
+}
+
+// Lauf liefert einen Lauf.
+func (d *Dienst) Lauf(ctx context.Context, id int64) (Lauf, error) {
+	rows, err := d.DB.QueryContext(ctx, `SELECT lf.id, l.kuerzel, lf.art, lf.status, lf.schritt, lf.start, lf.ende,
+			lf.datei_stand, lf.bericht, lf.meldung
+		FROM import_laeufe lf JOIN lieferanten l ON l.id = lf.lieferant_id WHERE lf.id = $1`, id)
+	if err != nil {
+		return Lauf{}, err
+	}
+	liste, err := laeufeLesen(rows)
+	if err != nil {
+		return Lauf{}, err
+	}
+	if len(liste) == 0 {
+		return Lauf{}, Fehler("Import nicht gefunden")
+	}
+	return liste[0], nil
 }
 
 // Laeufe liefert die letzten Läufe (kuerzel leer = alle Lieferanten).

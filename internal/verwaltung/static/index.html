@@ -94,9 +94,29 @@
         <tbody id="laeufe-liste"></tbody>
       </table>
       <p id="laeufe-leer" class="hinweis" hidden>Noch keine Importe.</p>
+      <p class="hinweis klein">Einen Import anklicken für das Protokoll: neue Artikel, Zuordnungen, EK-Änderungen, weggefallene Angebote (90 Tage aufbewahrt).</p>
     </section>
   </div>
 </main>
+
+<dialog id="protokoll" class="protokoll">
+  <div class="protokoll-kopf">
+    <div><h2 id="pr-titel">Importprotokoll</h2><p id="pr-zusammenfassung" class="hinweis"></p></div>
+    <button type="button" id="pr-zu" class="knopf leise" aria-label="Schliessen">✕</button>
+  </div>
+  <div id="pr-arten" class="pr-arten" role="tablist"></div>
+  <div class="pr-liste">
+    <table class="liste">
+      <thead><tr><th>Lieferanten-Nr.</th><th>Artikel</th><th>Bezeichnung</th><th class="r">Alt</th><th class="r">Neu</th></tr></thead>
+      <tbody id="pr-zeilen"></tbody>
+    </table>
+    <p id="pr-leer" class="hinweis" hidden></p>
+  </div>
+  <div class="protokoll-fuss">
+    <span id="pr-hinweis" class="hinweis"></span>
+    <button type="button" id="pr-csv" class="knopf">Als CSV herunterladen</button>
+  </div>
+</dialog>
 
 <template id="tpl-lieferant">
   <form class="lieferant">

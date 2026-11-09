@@ -149,3 +149,12 @@ func TestOhnePasswortKeineAnmeldung(t *testing.T) {
 		t.Fatalf("leeres Passwort: %d", rec.Code)
 	}
 }
+
+func TestCSVSicher(t *testing.T) {
+	for ein, aus := range map[string]string{"=SUMME(A1)": "'=SUMME(A1)", "+41": "'+41", "-5": "'-5", "@x": "'@x",
+		"Maus": "Maus", "": "", "12.50": "12.50"} {
+		if csvSicher(ein) != aus {
+			t.Errorf("csvSicher(%q) = %q", ein, csvSicher(ein))
+		}
+	}
+}

@@ -34,7 +34,7 @@ In der Verwaltung unter **Lieferanten und Importe**:
 5. **Jetzt importieren** oder **Datei hochladen …**; täglich z.B. um `05:15` mit eingeschaltetem
    Zeitplan (Competec stellt die Liste ab 4:30 Uhr bereit).
 
-Abgleich (in einer Transaktion, ~20 s für 236'000 Zeilen beim ersten Mal, ~6 s täglich):
+Abgleich (in einer Transaktion; gemessen mit 236'000 Zeilen: ~14 s beim ersten Mal, ~4 s täglich – auf langsameren Servern entsprechend länger):
 
 - Bestehende Angebote (Lieferant + Lieferanten-Nr.): EK, Lagerbestand, Lieferfrist nachführen.
 - Neue Angebote: Artikel über die EAN suchen (nur wenn eindeutig), sonst über Hersteller +
@@ -45,7 +45,11 @@ Abgleich (in einer Transaktion, ~20 s für 236'000 Zeilen beim ersten Mal, ~6 s 
 - **Schutz:** Enthält die Liste weniger als die Hälfte der bisher aktiven Angebote (z.B. abgebrochene
   Übertragung), wird nichts geändert.
 
-Jeder Lauf steht unter **Letzte Importe** mit Ergebnis oder Fehlermeldung.
+Jeder Lauf steht unter **Letzte Importe** mit Ergebnis oder Fehlermeldung. Ein Klick auf einen
+Lauf öffnet das **Protokoll**: neue Artikel, bestehenden Artikeln zugeordnet, EK geändert (alt → neu),
+Stammdaten geändert, nicht mehr gelistet, wieder gelistet – je als Reiter, die ersten 500 Zeilen in der
+Oberfläche, alle als CSV (Excel, Semikolon, UTF-8). Reine Bestandsänderungen werden nur gezählt.
+Die Details werden 90 Tage aufbewahrt, die Zusammenfassung bleibt.
 
 ## Lese-API (Version 1)
 
@@ -64,6 +68,8 @@ Artikelnummern: `AH` + 7 Ziffern + Luhn-Prüfziffer, z.B. `AH00000018` (bis 9,9 
 Die Nummer ist eindeutig, ändert sich nie (auch nicht, wenn das beste Angebot den Lieferanten
 wechselt) und dient als SelectLine-Artikelnummer; die Prüfziffer erkennt Tippfehler.
 Prüfen in Go: `katalog.NummerGueltig`.
+
+Die Suche nutzt die Tabelle `artikel_suche` mit Trigramm-Index (pg_trgm); sie ändert sich nur, wenn sich Bezeichnung, Hersteller, Nummern oder Angebote ändern – nicht bei Bestandsänderungen.
 
 Ein Artikel enthält die Stammdaten, `bestes` (das massgebende Angebot oder
 `null`) und `angebote` (alle aktiven, sortiert nach der Bestpreis-Regel).

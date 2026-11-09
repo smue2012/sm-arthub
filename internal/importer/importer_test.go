@@ -363,3 +363,51 @@ func TestLast(t *testing.T) {
 		t.Logf("suche %q: %d Treffer in %v", q, len(liste), time.Since(t0).Round(time.Millisecond))
 	}
 }
+
+func TestProtokoll(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	l := lieferant(t, db, "alltron")
+	lauf := func() int64 {
+		var id int64
+		db.QueryRow(`INSERT INTO import_laeufe (lieferant_id) VALUES ($1) RETURNING id`, l).Scan(&id)
+		return id
+	}
+	d := &Dienst{DB: db}
+	z, _, _ := CompetecLesen(liste(stehsammler, brixies, sandwich))
+	l1 := lauf()
+	if _, err := AbgleichenMitProtokoll(ctx, db, l, l1, z, nil, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	anzahl, _, _ := d.Details(ctx, l1, "", 0)
+	if anzahl["artikel_neu"] != 3 || len(anzahl) != 1 {
+		t.Fatalf("erster Lauf: %v", anzahl)
+	}
+	// EK Brixies, Name Sandwich, Stehsammler fällt weg; nur Bestand Sandwich ändern zählt nicht ins Protokoll
+	brixNeu := strings.Replace(brixies, "\t34.9\t", "\t33.5\t", 1)
+	sandNeu := strings.Replace(strings.Replace(sandwich, "Princess SandwichMaker", "Princess Sandwich-Maker", 1), "\t0\t3.16", "\t9\t3.16", 1)
+	z, _, _ = CompetecLesen(liste(brixNeu, sandNeu))
+	l2 := lauf()
+	b, err := AbgleichenMitProtokoll(ctx, db, l, l2, z, nil, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.PreiseGeaendert != 1 || b.BestandGeaendert != 1 || b.Deaktiviert != 1 {
+		t.Errorf("Bericht: %+v", b)
+	}
+	anzahl, preis, _ := d.Details(ctx, l2, "preis", 0)
+	if anzahl["preis"] != 1 || anzahl["stammdaten"] != 1 || anzahl["entfernt"] != 1 || anzahl["artikel_neu"] != 0 {
+		t.Fatalf("zweiter Lauf: %v", anzahl)
+	}
+	if len(preis) != 1 || preis[0].Alt != "34.9000" || preis[0].Neu != "33.5000" || preis[0].LieferantenNr != "2108613" ||
+		!strings.HasPrefix(preis[0].ArtikelNummer, "AH") {
+		t.Errorf("Preis-Detail: %+v", preis)
+	}
+	// Stehsammler kommt zurück
+	z, _, _ = CompetecLesen(liste(stehsammler, brixNeu, sandNeu))
+	l3 := lauf()
+	AbgleichenMitProtokoll(ctx, db, l, l3, z, nil, time.Time{})
+	if anzahl, _, _ := d.Details(ctx, l3, "", 0); anzahl["wieder"] != 1 || len(anzahl) != 1 {
+		t.Errorf("dritter Lauf: %v", anzahl)
+	}
+}

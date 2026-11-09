@@ -183,4 +183,33 @@ select { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--
   .laeufe td { border: 0; padding: 2px 0; }
   .laeufe td:nth-child(5) { grid-column: 1 / -1; }
 }
+
+
+.laeufe tbody tr { cursor: pointer; }
+.laeufe tbody tr:hover { background: var(--grund); }
+dialog.protokoll { width: min(960px, calc(100vw - 32px)); max-height: 88vh; padding: 0; border: 1px solid var(--linie);
+  border-radius: 10px; background: var(--flaeche); color: var(--text); }
+dialog.protokoll[open] { display: flex; flex-direction: column; }
+dialog.protokoll::backdrop { background: rgba(0, 0, 0, 0.35); }
+.protokoll-kopf { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 20px 8px; }
+.protokoll-kopf h2 { margin: 0 0 4px; }
+.protokoll-kopf .hinweis { margin: 0; }
+.pr-arten { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 20px 12px; border-bottom: 1px solid var(--linie); }
+.pr-arten button { font: inherit; font-size: 0.85rem; padding: 4px 10px; border-radius: 14px; border: 1px solid var(--linie);
+  background: transparent; color: var(--text); cursor: pointer; }
+.pr-arten button[aria-selected="true"] { background: var(--akzent); border-color: var(--akzent); color: var(--akzent-text); }
+.pr-arten button:disabled { opacity: 0.45; cursor: default; }
+.pr-liste { flex: 1; overflow: auto; padding: 0 20px; min-height: 120px; }
+.pr-liste .liste { margin-top: 0; }
+.pr-liste thead th { position: sticky; top: 0; background: var(--flaeche); }
+.pr-liste td { font-size: 0.9rem; }
+.pr-liste .r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pr-liste .mono { font-size: 12px; }
+.protokoll-fuss { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 20px;
+  border-top: 1px solid var(--linie); }
+.protokoll-fuss .hinweis { margin: 0; }
+@media (max-width: 640px) {
+  .pr-liste th:nth-child(1), .pr-liste td:nth-child(1), .pr-liste th:nth-child(2), .pr-liste td:nth-child(2) { display: none; }
+  .protokoll-fuss { flex-direction: column; align-items: stretch; }
+}
 [hidden] { display: none !important; }
