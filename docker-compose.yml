@@ -5,9 +5,12 @@
 #   ARTHUB_VERSION       Image-Tag, z.B. 26.11.1 (Vorgabe: latest)
 #
 # Der Hub ist bewusst NICHT öffentlich erreichbar: kein «ports:».
-# Die Apps erreichen ihn über das gemeinsame Docker-Netz «arthub» unter
-# http://sm-arthub:8110. Das Netz einmalig anlegen:  docker network create arthub
-# und in den Stacks der Apps (smerp, smshop) als externes Netz eintragen.
+# Der Stack legt das Docker-Netz «arthub» selbst an. Die Apps (smerp, smshop)
+# hängen sich in ihrem Stack als externes Netz daran und erreichen den Hub
+# unter http://sm-arthub:8110:
+#   networks:
+#     arthub:
+#       external: true
 
 services:
   sm-arthub:
@@ -40,4 +43,4 @@ volumes:
 networks:
   intern:
   arthub:
-    external: true
+    name: arthub

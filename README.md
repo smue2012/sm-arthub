@@ -54,7 +54,7 @@ Jede App bekommt ihren eigenen Schlüssel. Gespeichert wird nur der SHA-256-Hash
 der Schlüssel wird beim Anlegen einmal angezeigt und gehört danach nur in die
 serverseitige Konfiguration der App.
 
-In Portainer in der Konsole des Containers `sm-arthub`:
+In Portainer: Containers → `sm-arthub` → Console → Connect (Befehl `/bin/bash`), dann:
 
 ```
 /sm-arthub schluessel anlegen smerp
@@ -66,13 +66,16 @@ Erneutes `anlegen` für dieselbe App ersetzt den alten Schlüssel.
 
 ## Betrieb
 
-`docker-compose.yml` als Stack in Portainer. Vorher:
+`docker-compose.yml` als Stack in Portainer (Stacks → Add stack):
 
-1. Netz für die Apps einmalig anlegen: `docker network create arthub`
-2. Im Stack die Variablen `ARTHUB_DB_PASSWORT` (frei wählen) und optional
+1. Im Stack die Variablen `ARTHUB_DB_PASSWORT` (frei wählen) und optional
    `ARTHUB_VERSION` setzen
-3. Die Stacks der Apps an das externe Netz `arthub` hängen; sie erreichen den
-   Hub dann unter `http://sm-arthub:8110`
+2. Der Stack legt das Netz `arthub` selbst an
+3. Die Stacks der Apps hängen sich als externes Netz `arthub` daran und
+   erreichen den Hub unter `http://sm-arthub:8110`
+
+Das Image ist privat (ghcr.io): Portainer braucht die Registry ghcr.io mit
+Zugang, wie für smerp.
 
 Umgebung des Programms: `DATABASE_URL` (Pflicht), `PORT` (Vorgabe 8110).
 Migrationen laufen beim Start automatisch (`internal/datenbank/migrationen`,
