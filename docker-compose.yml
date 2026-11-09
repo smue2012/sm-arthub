@@ -1,0 +1,43 @@
+# Stack für Portainer.
+#
+# Vor dem Bereitstellen in Portainer als Umgebungsvariable setzen:
+#   ARTHUB_DB_PASSWORT   Passwort der Datenbank (frei wählen, nur hier)
+#   ARTHUB_VERSION       Image-Tag, z.B. 26.11.1 (Vorgabe: latest)
+#
+# Der Hub ist bewusst NICHT öffentlich erreichbar: kein «ports:».
+# Die Apps erreichen ihn über das gemeinsame Docker-Netz «arthub» unter
+# http://sm-arthub:8110. Das Netz einmalig anlegen:  docker network create arthub
+# und in den Stacks der Apps (smerp, smshop) als externes Netz eintragen.
+
+services:
+  sm-arthub:
+    image: ghcr.io/smue2012/sm-arthub:${ARTHUB_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://arthub:${ARTHUB_DB_PASSWORT}@db:5432/arthub?sslmode=disable
+      PORT: "8110"
+    depends_on:
+      - db
+    networks:
+      - intern
+      - arthub
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: arthub
+      POSTGRES_PASSWORD: ${ARTHUB_DB_PASSWORT}
+      POSTGRES_DB: arthub
+    volumes:
+      - arthub-db:/var/lib/postgresql/data
+    networks:
+      - intern
+
+volumes:
+  arthub-db:
+
+networks:
+  intern:
+  arthub:
+    external: true
