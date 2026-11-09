@@ -132,8 +132,7 @@ func (r Repository) Nummer(ctx context.Context, nummer string) (Artikel, error) 
 }
 
 // Suche findet aktive Artikel, in denen jedes Wort von q vorkommt (Bezeichnung,
-// Beschreibung, Hersteller, Herstellernummer, EAN, Hub-Nummer oder
-// Lieferanten-Artikelnummer). nurVerfuegbar: nur Artikel mit einem Angebot an
+// Hersteller, Herstellernummer, EAN, Hub-Nummer oder Lieferanten-Artikelnummer). nurVerfuegbar: nur Artikel mit einem Angebot an
 // Lager. Sortiert nach Bezeichnung; mehr = es gäbe weitere Treffer.
 func (r Repository) Suche(ctx context.Context, q string, limit int, nurVerfuegbar bool) (liste []Artikel, mehr bool, err error) {
 	woerter := strings.Fields(q)
@@ -146,12 +145,11 @@ func (r Repository) Suche(ctx context.Context, q string, limit int, nurVerfuegba
 	var bed []string
 	args := []any{}
 	for _, w := range woerter {
-		args = append(args, "%"+likeMaskieren(w)+"%")
+		args = append(args, "%"+likeMaskieren(strings.ToLower(w))+"%")
 		n := len(args)
-		bed = append(bed, fmt.Sprintf(`(a.bezeichnung ILIKE $%[1]d OR a.beschreibung ILIKE $%[1]d
-			OR a.hersteller ILIKE $%[1]d OR a.hersteller_nr ILIKE $%[1]d OR a.ean ILIKE $%[1]d
-			OR a.nummer ILIKE $%[1]d OR EXISTS (SELECT 1 FROM angebote x
-				WHERE x.artikel_id = a.id AND x.lieferanten_nr ILIKE $%[1]d))`, n))
+		// suchtext und lieferanten_nr haben Trigramm-Indizes (Migration 004)
+		bed = append(bed, fmt.Sprintf(`(a.suchtext LIKE $%[1]d OR a.id IN (SELECT x.artikel_id FROM angebote x
+				WHERE x.lieferanten_nr ILIKE $%[1]d))`, n))
 	}
 	if nurVerfuegbar {
 		bed = append(bed, `EXISTS (SELECT 1 FROM angebote v JOIN lieferanten vl ON vl.id = v.lieferant_id AND vl.aktiv

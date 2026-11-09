@@ -15,9 +15,37 @@ Stack: Go 1.24 + PostgreSQL 16, Betrieb mit Docker/Portainer.
 
 ## Stand
 
-Etappe 1: Grundgerüst, Datenmodell, Lese-API, API-Schlüssel mit Verwaltungsoberfläche.
-Noch keine Importer – Daten kommen in den nächsten Etappen (Alltron, Brack,
-eigene Artikel, Pax8; Export für SelectLine als CSV/XML später).
+- Etappe 1: Grundgerüst, Datenmodell, Lese-API, API-Schlüssel mit Verwaltungsoberfläche.
+- Etappe 2: Import der Alltron-Preisliste (Competec `ArtikelPreisdatenV2.csv`) mit Bildliste,
+  von Hand, als Datei oder täglich nach Zeitplan.
+- Später: Brack, eigene Artikel, Pax8; Export für SelectLine als CSV/XML.
+
+## Importe der Preislisten
+
+In der Verwaltung unter **Lieferanten und Importe**:
+
+1. **+ Lieferant**, z.B. Kürzel `alltron`, Name `Alltron AG`, Preisliste «Alltron / Competec».
+2. Adresse (z.B. `sftp://ftp.competec.ch/ArtikelPreisdatenV2.csv`), Benutzer und Passwort eintragen
+   (Zugang bei Competec über «Request for electronic services»). Das Passwort bleibt in der
+   Datenbank des Hubs und wird nie an den Browser zurückgegeben.
+3. **Verbindung prüfen** holt den Fingerabdruck des SFTP-Servers; übernehmen und speichern. Ohne
+   bestätigten Fingerabdruck verbindet der Hub nie (Schutz gegen einen untergeschobenen Server).
+4. Optional die Adresse der **Bildliste** (`Artikelnummer;Bild-Link`, gleicher Zugang).
+5. **Jetzt importieren** oder **Datei hochladen …**; täglich z.B. um `05:15` mit eingeschaltetem
+   Zeitplan (Competec stellt die Liste ab 4:30 Uhr bereit).
+
+Abgleich (in einer Transaktion, ~20 s für 236'000 Zeilen beim ersten Mal, ~6 s täglich):
+
+- Bestehende Angebote (Lieferant + Lieferanten-Nr.): EK, Lagerbestand, Lieferfrist nachführen.
+- Neue Angebote: Artikel über die EAN suchen (nur wenn eindeutig), sonst über Hersteller +
+  Herstellernummer, sonst neuen Artikel anlegen. So landen gleiche Produkte verschiedener
+  Lieferanten auf einem Artikel, und der Bestpreis vergleicht sie.
+- Die Stammdaten (Bezeichnung usw.) pflegt der Lieferant, dessen Liste den Artikel angelegt hat.
+- Nicht mehr gelistete Angebote werden inaktiv; Artikel ohne aktives Angebot ebenfalls.
+- **Schutz:** Enthält die Liste weniger als die Hälfte der bisher aktiven Angebote (z.B. abgebrochene
+  Übertragung), wird nichts geändert.
+
+Jeder Lauf steht unter **Letzte Importe** mit Ergebnis oder Fehlermeldung.
 
 ## Lese-API (Version 1)
 
@@ -28,7 +56,7 @@ Unbekannte Parameter werden abgelehnt (400). Geändert wird nur rückwärtskompa
 | --- | --- |
 | `GET /api/v1/artikel?seit=<stand>&limit=<n>` | `{artikel, stand, mehr}` – Delta-Abgleich, `limit` 1–2000 (Vorgabe 500) |
 | `GET /api/v1/artikel/{nummer}` | ein Artikel, 404 wenn unbekannt |
-| `GET /api/v1/suche?q=<wörter>&limit=<n>&verfuegbar=1` | `{artikel, mehr}` – aktive Artikel, in denen jedes Wort vorkommt (Bezeichnung, Beschreibung, Hersteller, Herstellernummer, EAN, Hub-Nummer, Lieferanten-Artikelnummer); `limit` 1–200 (Vorgabe 50), `verfuegbar=1` nur an Lager |
+| `GET /api/v1/suche?q=<wörter>&limit=<n>&verfuegbar=1` | `{artikel, mehr}` – aktive Artikel, in denen jedes Wort vorkommt (Bezeichnung, Hersteller, Herstellernummer, EAN, Hub-Nummer, Lieferanten-Artikelnummer; Trigramm-Index); `limit` 1–200 (Vorgabe 50), `verfuegbar=1` nur an Lager |
 | `GET /api/v1/lieferanten` | `{lieferanten}` |
 | `GET /health` | `ok` (ohne Schlüssel, für Docker) |
 
@@ -130,4 +158,5 @@ danach das Image.
 | `internal/katalog` | Artikel und Angebote lesen, Bestpreis-Regel |
 | `internal/schluessel` | API-Schlüssel (nur Hash gespeichert) |
 | `internal/api` | Lese-API v1 |
-| `internal/verwaltung` | Verwaltungsoberfläche (Anmeldung, API-Schlüssel, Status) |
+| `internal/importer` | Preislisten holen (sftp mit Fingerabdruck, ftps, https), Competec lesen, Abgleich, Zeitplan |
+| `internal/verwaltung` | Verwaltungsoberfläche (Anmeldung, API-Schlüssel, Lieferanten/Importe, Status) |

@@ -150,3 +150,37 @@ form > .knopf { margin-top: 16px; }
   .liste td.erstellt, .liste td.zuletzt { color: var(--leise); font-size: 0.85rem; }
   .liste td.aktionen { grid-column: 1 / -1; text-align: left; padding-top: 6px; }
 }
+
+.karte + .karte { margin-top: 16px; }
+.karte-kopf { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.karte-kopf h2 { margin: 0; }
+.karte-kopf + .hinweis { margin-top: 8px; }
+.feld-gitter { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px; }
+.feld-gitter .breit { grid-column: 1 / -1; }
+.feld-gitter .check { display: flex; align-items: end; padding-bottom: 8px; }
+label.inline { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 0.95rem; margin: 0; }
+label.inline input { width: auto; }
+select { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--linie); border-radius: 6px;
+  background: var(--grund); color: var(--text); }
+.zeile.rechts { justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+.mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; }
+.klein { font-size: 0.85rem; margin: 6px 0 0; }
+.lief-neu { border: 1px dashed var(--linie); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.lieferant { border: 1px solid var(--linie); border-radius: 8px; padding: 16px; margin-top: 12px; }
+.lief-kopf { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.lief-kopf .l-kuerzel { color: var(--leise); font-size: 0.85rem; margin-left: 4px; }
+.lief-kopf .l-stand { color: var(--leise); font-size: 0.85rem; }
+.datei-knopf { display: inline-flex; align-items: center; margin: 0; font-size: 15px; color: var(--akzent); }
+.laeufe td { vertical-align: top; }
+.laeufe .ergebnis-text { color: var(--leise); font-size: 0.85rem; }
+.status-laeuft { color: var(--akzent); }
+.status-ok { color: var(--gut); }
+.status-fehler { color: var(--gefahr); }
+@media (max-width: 640px) {
+  .feld-gitter { grid-template-columns: 1fr; }
+  .laeufe thead { display: none; }
+  .laeufe tr { display: grid; grid-template-columns: 1fr auto; padding: 8px 0; border-bottom: 1px solid var(--linie); }
+  .laeufe td { border: 0; padding: 2px 0; }
+  .laeufe td:nth-child(5) { grid-column: 1 / -1; }
+}
+[hidden] { display: none !important; }

@@ -33,6 +33,7 @@ import (
 
 	"github.com/smue2012/sm-arthub/internal/api"
 	"github.com/smue2012/sm-arthub/internal/datenbank"
+	"github.com/smue2012/sm-arthub/internal/importer"
 	"github.com/smue2012/sm-arthub/internal/katalog"
 	"github.com/smue2012/sm-arthub/internal/schluessel"
 	"github.com/smue2012/sm-arthub/internal/verwaltung"
@@ -93,6 +94,13 @@ func starten(log *slog.Logger, port string) error {
 	defer v.Close()
 
 	db := v.DB
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Importe der Preislisten: von Hand über die Verwaltung und täglich nach Zeitplan
+	importe := importer.Neu(ctx, db, log)
+	go importe.Zeitplan(ctx)
+
 	server := []*http.Server{{
 		Addr:              ":" + port,
 		Handler:           api.Handler(katalog.Repository{DB: db}, schluessel.Verwaltung{DB: db}, log),
@@ -119,16 +127,14 @@ func starten(log *slog.Logger, port string) error {
 				Passwort:         passwort,
 				Schluessel:       schluessel.Verwaltung{DB: db},
 				Status:           statusQuelle(db),
+				Importe:          importe,
 				Log:              log,
 				FehlVerzoegerung: time.Second,
 			}),
 			ReadHeaderTimeout: 10 * time.Second,
-			WriteTimeout:      30 * time.Second,
+			WriteTimeout:      10 * time.Minute, // Hochladen einer Preisliste (~110 MB)
 		})
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	fehler := make(chan error, len(server))
 	for _, srv := range server {

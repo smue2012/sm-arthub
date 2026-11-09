@@ -61,8 +61,73 @@
       </table>
       <p id="leer-hinweis" class="hinweis" hidden>Noch keine Schlüssel angelegt.</p>
     </section>
+
+    <section class="karte">
+      <div class="karte-kopf">
+        <h2>Lieferanten und Importe</h2>
+        <button type="button" id="lief-neu-knopf" class="knopf leise">+ Lieferant</button>
+      </div>
+      <p class="hinweis">Die Preislisten der Lieferanten füllen den Katalog. Der Import gleicht Artikel über EAN und
+        Herstellernummer ab, führt EK und Lagerbestand nach und setzt Artikel inaktiv, die nicht mehr geliefert werden.</p>
+
+      <form id="lief-neu" class="lief-neu" hidden>
+        <div class="feld-gitter">
+          <div><label for="ln-kuerzel">Kürzel</label><input id="ln-kuerzel" placeholder="alltron" maxlength="30" required></div>
+          <div><label for="ln-name">Name</label><input id="ln-name" placeholder="Alltron AG" maxlength="100" required></div>
+          <div><label for="ln-format">Preisliste</label><select id="ln-format"></select></div>
+        </div>
+        <p id="ln-fehler" class="meldung fehler" hidden></p>
+        <div class="zeile rechts">
+          <button type="button" id="ln-abbrechen" class="knopf leise">Abbrechen</button>
+          <button type="submit" class="knopf">Lieferant anlegen</button>
+        </div>
+      </form>
+
+      <div id="lieferanten-liste"></div>
+      <p id="lief-leer" class="hinweis" hidden>Noch keine Lieferanten. Mit «+ Lieferant» zum Beispiel Alltron mit der Preisliste «Alltron / Competec» anlegen.</p>
+    </section>
+
+    <section class="karte">
+      <h2>Letzte Importe</h2>
+      <table class="liste laeufe">
+        <thead><tr><th>Start</th><th>Lieferant</th><th>Art</th><th>Status</th><th>Ergebnis</th></tr></thead>
+        <tbody id="laeufe-liste"></tbody>
+      </table>
+      <p id="laeufe-leer" class="hinweis" hidden>Noch keine Importe.</p>
+    </section>
   </div>
 </main>
+
+<template id="tpl-lieferant">
+  <form class="lieferant">
+    <div class="lief-kopf">
+      <div><strong class="l-name"></strong> <span class="l-kuerzel"></span></div>
+      <span class="l-stand"></span>
+    </div>
+    <div class="feld-gitter">
+      <div class="breit"><label>Adresse der Preisliste</label>
+        <input name="url" placeholder="sftp://ftp.competec.ch/ArtikelPreisdatenV2.csv" autocomplete="off"></div>
+      <div><label>Benutzer</label><input name="benutzer" autocomplete="off"></div>
+      <div><label>Passwort</label><input name="passwort" type="password" autocomplete="new-password"></div>
+      <div class="breit fp-zeile"><label>Fingerabdruck des Servers (SFTP)</label>
+        <div class="zeile">
+          <input name="fingerabdruck" class="mono" placeholder="mit «Verbindung prüfen» holen und bestätigen" autocomplete="off">
+          <button type="button" class="knopf leise l-pruefen">Verbindung prüfen</button>
+        </div>
+        <p class="l-fp-info hinweis klein" hidden></p></div>
+      <div class="breit"><label>Adresse der Bildliste (optional)</label>
+        <input name="bildliste_url" placeholder="sftp://server/Bildliste.csv" autocomplete="off"></div>
+      <div><label>Täglich um</label><input name="zeit" placeholder="05:15" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" maxlength="5"></div>
+      <div class="check"><label class="inline"><input type="checkbox" name="aktiv"> Zeitplan eingeschaltet</label></div>
+    </div>
+    <p class="l-fehler meldung fehler" hidden></p>
+    <div class="zeile rechts lief-aktionen">
+      <label class="knopf leise datei-knopf">Datei hochladen …<input type="file" class="l-datei" accept=".csv,.txt" hidden></label>
+      <button type="button" class="knopf leise l-importieren">Jetzt importieren</button>
+      <button type="submit" class="knopf">Speichern</button>
+    </div>
+  </form>
+</template>
 
 <template id="tpl-zeile">
   <tr>

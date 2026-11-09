@@ -15,6 +15,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/smue2012/sm-arthub/internal/importer"
 	"github.com/smue2012/sm-arthub/internal/schluessel"
 )
 
@@ -53,11 +55,22 @@ type Status struct {
 // StatusQuelle liefert den Status (im Test eine Attrappe).
 type StatusQuelle func(ctx context.Context) (Status, error)
 
+// Importe: was die Oberfläche vom Importdienst braucht.
+type Importe interface {
+	Lieferanten(ctx context.Context) ([]importer.Quelle, error)
+	LieferantAnlegen(ctx context.Context, kuerzel, name, format string) error
+	ImportSpeichern(ctx context.Context, kuerzel string, e importer.Eingabe) error
+	Fingerabdruck(ctx context.Context, adresse string) (string, string, error)
+	Starten(kuerzel, art string, datei []byte) (int64, error)
+	Laeufe(ctx context.Context, kuerzel string, limit int) ([]importer.Lauf, error)
+}
+
 // Optionen der Oberfläche.
 type Optionen struct {
 	Passwort   string
 	Schluessel Schluessel
 	Status     StatusQuelle
+	Importe    Importe
 	Log        *slog.Logger
 	// FehlVerzoegerung bremst falsche Anmeldungen (Vorgabe 1 s, im Test 0).
 	FehlVerzoegerung time.Duration
@@ -89,6 +102,15 @@ func Handler(opt Optionen) http.Handler {
 	api.Handle("GET /api/schluessel", s.nurAngemeldet(s.liste))
 	api.Handle("POST /api/schluessel", s.nurAngemeldet(s.anlegen))
 	api.Handle("POST /api/schluessel/{name}/sperren", s.nurAngemeldet(s.sperren))
+	if opt.Importe != nil {
+		api.Handle("GET /api/lieferanten", s.nurAngemeldet(s.lieferanten))
+		api.Handle("POST /api/lieferanten", s.nurAngemeldet(s.lieferantAnlegen))
+		api.Handle("PUT /api/lieferanten/{kuerzel}/import", s.nurAngemeldet(s.importSpeichern))
+		api.Handle("POST /api/fingerabdruck", s.nurAngemeldet(s.fingerabdruck))
+		api.Handle("POST /api/lieferanten/{kuerzel}/importieren", s.nurAngemeldet(s.importieren))
+		api.Handle("POST /api/lieferanten/{kuerzel}/hochladen", s.nurAngemeldet(s.hochladen))
+		api.Handle("GET /api/laeufe", s.nurAngemeldet(s.laeufe))
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", nurMitKopf(api))
@@ -256,6 +278,119 @@ func (s *server) sperren(w http.ResponseWriter, r *http.Request) {
 	}
 	s.opt.Log.Info("api-schlüssel gesperrt", "app", name, "von", r.RemoteAddr)
 	jsonAntwort(w, http.StatusOK, map[string]string{"name": name})
+}
+
+// ---------- Lieferanten und Importe ----------
+
+// importFehler: Meldungen des Importers an die Oberfläche, sonst interner Fehler.
+func (s *server) importFehler(w http.ResponseWriter, err error) {
+	var f importer.Fehler
+	if errors.As(err, &f) {
+		fehler(w, http.StatusBadRequest, string(f))
+		return
+	}
+	s.serverfehler(w, err)
+}
+
+func (s *server) lieferanten(w http.ResponseWriter, r *http.Request) {
+	liste, err := s.opt.Importe.Lieferanten(r.Context())
+	if err != nil {
+		s.serverfehler(w, err)
+		return
+	}
+	jsonAntwort(w, http.StatusOK, map[string]any{"lieferanten": liste, "formate": importer.Formate})
+}
+
+func (s *server) lieferantAnlegen(w http.ResponseWriter, r *http.Request) {
+	var ein struct {
+		Kuerzel string `json:"kuerzel"`
+		Name    string `json:"name"`
+		Format  string `json:"format"`
+	}
+	if err := lesen(r, &ein); err != nil {
+		fehler(w, http.StatusBadRequest, "ungültige Anfrage")
+		return
+	}
+	if err := s.opt.Importe.LieferantAnlegen(r.Context(), ein.Kuerzel, ein.Name, ein.Format); err != nil {
+		s.importFehler(w, err)
+		return
+	}
+	s.opt.Log.Info("lieferant angelegt", "kuerzel", ein.Kuerzel, "von", r.RemoteAddr)
+	jsonAntwort(w, http.StatusOK, map[string]string{"kuerzel": ein.Kuerzel})
+}
+
+func (s *server) importSpeichern(w http.ResponseWriter, r *http.Request) {
+	var ein importer.Eingabe
+	if err := lesen(r, &ein); err != nil {
+		fehler(w, http.StatusBadRequest, "ungültige Anfrage")
+		return
+	}
+	if err := s.opt.Importe.ImportSpeichern(r.Context(), r.PathValue("kuerzel"), ein); err != nil {
+		s.importFehler(w, err)
+		return
+	}
+	s.opt.Log.Info("import gespeichert", "lieferant", r.PathValue("kuerzel"), "von", r.RemoteAddr)
+	jsonAntwort(w, http.StatusOK, map[string]bool{"gespeichert": true})
+}
+
+func (s *server) fingerabdruck(w http.ResponseWriter, r *http.Request) {
+	var ein struct {
+		URL string `json:"url"`
+	}
+	if err := lesen(r, &ein); err != nil {
+		fehler(w, http.StatusBadRequest, "ungültige Anfrage")
+		return
+	}
+	fp, art, err := s.opt.Importe.Fingerabdruck(r.Context(), ein.URL)
+	if err != nil {
+		s.importFehler(w, err)
+		return
+	}
+	jsonAntwort(w, http.StatusOK, map[string]string{"fingerabdruck": fp, "art": art})
+}
+
+func (s *server) importieren(w http.ResponseWriter, r *http.Request) {
+	id, err := s.opt.Importe.Starten(r.PathValue("kuerzel"), "abruf", nil)
+	if err != nil {
+		s.importFehler(w, err)
+		return
+	}
+	s.opt.Log.Info("import von hand gestartet", "lieferant", r.PathValue("kuerzel"), "von", r.RemoteAddr)
+	jsonAntwort(w, http.StatusOK, map[string]int64{"lauf": id})
+}
+
+func (s *server) hochladen(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, importer.MaxDatei+1<<20)
+	f, _, err := r.FormFile("datei")
+	if err != nil {
+		fehler(w, http.StatusBadRequest, "Datei fehlt oder ist grösser als 300 MB")
+		return
+	}
+	defer f.Close()
+	daten, err := io.ReadAll(io.LimitReader(f, importer.MaxDatei+1))
+	if err != nil || len(daten) == 0 || len(daten) > importer.MaxDatei {
+		fehler(w, http.StatusBadRequest, "Datei leer oder grösser als 300 MB")
+		return
+	}
+	if r.MultipartForm != nil {
+		r.MultipartForm.RemoveAll()
+	}
+	id, err := s.opt.Importe.Starten(r.PathValue("kuerzel"), "datei", daten)
+	if err != nil {
+		s.importFehler(w, err)
+		return
+	}
+	s.opt.Log.Info("import aus datei gestartet", "lieferant", r.PathValue("kuerzel"), "bytes", len(daten), "von", r.RemoteAddr)
+	jsonAntwort(w, http.StatusOK, map[string]int64{"lauf": id})
+}
+
+func (s *server) laeufe(w http.ResponseWriter, r *http.Request) {
+	liste, err := s.opt.Importe.Laeufe(r.Context(), r.URL.Query().Get("lieferant"), 20)
+	if err != nil {
+		s.serverfehler(w, err)
+		return
+	}
+	jsonAntwort(w, http.StatusOK, map[string]any{"laeufe": liste})
 }
 
 func (s *server) serverfehler(w http.ResponseWriter, err error) {
