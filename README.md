@@ -15,7 +15,7 @@ Stack: Go 1.24 + PostgreSQL 16, Betrieb mit Docker/Portainer.
 
 ## Stand
 
-Etappe 1: Grundgerüst, Datenmodell, Lese-API, API-Schlüssel.
+Etappe 1: Grundgerüst, Datenmodell, Lese-API, API-Schlüssel mit Verwaltungsoberfläche.
 Noch keine Importer – Daten kommen in den nächsten Etappen (Alltron, Brack,
 eigene Artikel, Pax8; Export für SelectLine als CSV/XML später).
 
@@ -48,13 +48,24 @@ Artikel werden nie gelöscht, nur `aktiv: false` gesetzt – so erfährt die App
 den Wegfall. Auf Belegen speichern die Apps die Artikeldaten als Kopie, nie als
 Verweis auf den Hub (GeBüV).
 
-## API-Schlüssel
+## Verwaltungsoberfläche und API-Schlüssel
 
-Jede App bekommt ihren eigenen Schlüssel. Gespeichert wird nur der SHA-256-Hash;
-der Schlüssel wird beim Anlegen einmal angezeigt und gehört danach nur in die
-serverseitige Konfiguration der App.
+Die Verwaltung läuft auf einem eigenen Port (`ADMIN_PORT`, Vorgabe 8111),
+getrennt von der Lese-API. Anmeldung mit `ARTHUB_ADMIN_PASSWORT`
+(mindestens 12 Zeichen; ohne Passwort startet die Verwaltung nicht).
 
-In Portainer: Containers → `sm-arthub` → Console → Connect (Befehl `/bin/bash`), dann:
+Dort werden die API-Schlüssel verwaltet: Jede App bekommt ihren eigenen
+Schlüssel. Er wird beim Erzeugen genau einmal angezeigt (zum Kopieren in die
+serverseitige Konfiguration der App); gespeichert ist nur der SHA-256-Hash.
+«Neu erzeugen» ersetzt den alten Schlüssel, «Sperren» entzieht den Zugriff.
+
+Schutz: Sitzungscookie `HttpOnly` und `SameSite=Strict` (hinter HTTPS auch
+`Secure`, über `X-Forwarded-Proto`), Kopf `X-Arthub: 1` auf allen Aufrufen,
+strenge CSP ohne Inline-Skript, falsches Passwort bremst 1 s.
+Sitzungen liegen im Speicher und enden nach 8 Stunden ohne Aktivität oder mit
+einem Neustart.
+
+Notfall ohne Oberfläche (Portainer: Container → Console, `/bin/bash`):
 
 ```
 /sm-arthub schluessel anlegen smerp
@@ -62,14 +73,12 @@ In Portainer: Containers → `sm-arthub` → Console → Connect (Befehl `/bin/b
 /sm-arthub schluessel sperren smerp
 ```
 
-Erneutes `anlegen` für dieselbe App ersetzt den alten Schlüssel.
-
 ## Betrieb
 
 `docker-compose.yml` als Stack in Portainer (Stacks → Add stack):
 
-1. Im Stack die Variablen `ARTHUB_DB_PASSWORT` (frei wählen) und optional
-   `ARTHUB_VERSION` setzen
+1. Im Stack die Variablen `ARTHUB_DB_PASSWORT` und `ARTHUB_ADMIN_PASSWORT`
+   (beide frei wählen) und optional `ARTHUB_VERSION`, `ARTHUB_ADMIN_PORT` setzen
 2. Der Stack legt das Netz `arthub` selbst an. Beide Netze haben feste
    Subnetze (`ARTHUB_NETZ_INTERN`, Vorgabe `10.250.250.0/28`, und
    `ARTHUB_NETZ`, Vorgabe `10.250.250.16/28`), weil die Standard-Adresspools
@@ -82,7 +91,10 @@ Erneutes `anlegen` für dieselbe App ersetzt den alten Schlüssel.
 Das Image ist privat (ghcr.io): Portainer braucht die Registry ghcr.io mit
 Zugang, wie für smerp.
 
-Umgebung des Programms: `DATABASE_URL` (Pflicht), `PORT` (Vorgabe 8110).
+4. Verwaltung unter `http://<host>:8111` öffnen, besser über NPM mit HTTPS
+
+Umgebung des Programms: `DATABASE_URL` (Pflicht), `PORT` (Lese-API, Vorgabe
+8110), `ADMIN_PORT` (Verwaltung, Vorgabe 8111), `ARTHUB_ADMIN_PASSWORT`.
 Migrationen laufen beim Start automatisch (`internal/datenbank/migrationen`,
 bestehende Dateien nie ändern, nur neue Nummern anlegen).
 
@@ -110,3 +122,4 @@ danach das Image.
 | `internal/katalog` | Artikel und Angebote lesen, Bestpreis-Regel |
 | `internal/schluessel` | API-Schlüssel (nur Hash gespeichert) |
 | `internal/api` | Lese-API v1 |
+| `internal/verwaltung` | Verwaltungsoberfläche (Anmeldung, API-Schlüssel, Status) |

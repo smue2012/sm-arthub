@@ -4,13 +4,19 @@
 //
 // Aufruf:
 //
-//	sm-arthub                          Server starten
+//	sm-arthub                          Server starten (Lese-API und Verwaltung)
 //	sm-arthub health                   Healthcheck (für Docker)
-//	sm-arthub schluessel anlegen APP   API-Schlüssel für APP erzeugen (einmal angezeigt)
+//	sm-arthub schluessel anlegen APP   Notfall: API-Schlüssel ohne Oberfläche erzeugen
 //	sm-arthub schluessel liste         Schlüssel auflisten (ohne Geheimnis)
 //	sm-arthub schluessel sperren APP   Schlüssel von APP sperren
 //
-// Umgebung: DATABASE_URL (Pflicht), PORT (Vorgabe 8110).
+// Umgebung:
+//
+//	DATABASE_URL            Pflicht
+//	PORT                    Lese-API für die Apps (Vorgabe 8110, nur im Docker-Netz)
+//	ADMIN_PORT              Verwaltungsoberfläche (Vorgabe 8111)
+//	ARTHUB_ADMIN_PASSWORT   Passwort der Verwaltung, mindestens 12 Zeichen;
+//	                        fehlt es, startet die Verwaltung nicht
 package main
 
 import (
@@ -29,6 +35,7 @@ import (
 	"github.com/smue2012/sm-arthub/internal/datenbank"
 	"github.com/smue2012/sm-arthub/internal/katalog"
 	"github.com/smue2012/sm-arthub/internal/schluessel"
+	"github.com/smue2012/sm-arthub/internal/verwaltung"
 )
 
 // Von GitHub Actions beim Bauen gesetzt.
@@ -85,29 +92,82 @@ func starten(log *slog.Logger, port string) error {
 	}
 	defer v.Close()
 
-	h := api.Handler(katalog.Repository{DB: v.DB}, schluessel.Verwaltung{DB: v.DB}, log)
-	srv := &http.Server{
+	db := v.DB
+	server := []*http.Server{{
 		Addr:              ":" + port,
-		Handler:           h,
+		Handler:           api.Handler(katalog.Repository{DB: db}, schluessel.Verwaltung{DB: db}, log),
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      120 * time.Second,
+	}}
+
+	adminPort := os.Getenv("ADMIN_PORT")
+	if adminPort == "" {
+		adminPort = "8111"
+	}
+	passwort := os.Getenv("ARTHUB_ADMIN_PASSWORT")
+	switch {
+	case passwort == "":
+		log.Warn("ARTHUB_ADMIN_PASSWORT fehlt – Verwaltungsoberfläche ist aus")
+	case len(passwort) < 12:
+		return errors.New("ARTHUB_ADMIN_PASSWORT muss mindestens 12 Zeichen haben")
+	case adminPort == port:
+		return errors.New("ADMIN_PORT und PORT müssen verschieden sein")
+	default:
+		server = append(server, &http.Server{
+			Addr: ":" + adminPort,
+			Handler: verwaltung.Handler(verwaltung.Optionen{
+				Passwort:         passwort,
+				Schluessel:       schluessel.Verwaltung{DB: db},
+				Status:           statusQuelle(db),
+				Log:              log,
+				FehlVerzoegerung: time.Second,
+			}),
+			ReadHeaderTimeout: 10 * time.Second,
+			WriteTimeout:      30 * time.Second,
+		})
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go func() {
-		<-ctx.Done()
-		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		srv.Shutdown(c)
-	}()
 
-	log.Info("sm-arthub gestartet", "port", port, "version", version, "gebaut", gebaut,
-		"migration", datenbank.Stand())
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+	fehler := make(chan error, len(server))
+	for _, srv := range server {
+		go func() {
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				fehler <- fmt.Errorf("%s: %w", srv.Addr, err)
+				return
+			}
+			fehler <- nil
+		}()
 	}
-	return nil
+	log.Info("sm-arthub gestartet", "port", port, "admin_port", adminPort,
+		"verwaltung", len(server) > 1, "version", version, "gebaut", gebaut,
+		"migration", datenbank.Stand())
+
+	var ergebnis error
+	select {
+	case <-ctx.Done():
+	case ergebnis = <-fehler:
+	}
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, srv := range server {
+		srv.Shutdown(c)
+	}
+	return ergebnis
+}
+
+// statusQuelle zählt Artikel, Angebote und Lieferanten für die Verwaltung.
+func statusQuelle(db *sql.DB) verwaltung.StatusQuelle {
+	return func(ctx context.Context) (verwaltung.Status, error) {
+		st := verwaltung.Status{Version: version, Migration: datenbank.Stand()}
+		err := db.QueryRowContext(ctx, `SELECT
+			(SELECT count(*) FROM artikel WHERE aktiv),
+			(SELECT count(*) FROM angebote WHERE aktiv),
+			(SELECT count(*) FROM lieferanten WHERE aktiv)`).
+			Scan(&st.Artikel, &st.Angebote, &st.Lieferanten)
+		return st, err
+	}
 }
 
 func health(port string) int {

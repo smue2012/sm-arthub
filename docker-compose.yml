@@ -1,7 +1,9 @@
 # Stack für Portainer.
 #
 # Vor dem Bereitstellen in Portainer als Umgebungsvariable setzen:
-#   ARTHUB_DB_PASSWORT   Passwort der Datenbank (frei wählen, nur hier)
+#   ARTHUB_DB_PASSWORT     Passwort der Datenbank (frei wählen, nur hier)
+#   ARTHUB_ADMIN_PASSWORT  Passwort der Verwaltungsoberfläche (mind. 12 Zeichen)
+#   ARTHUB_ADMIN_PORT      Port der Verwaltung auf dem Host (Vorgabe 8111)
 #   ARTHUB_VERSION       Image-Tag, z.B. 26.11.1 (Vorgabe: latest)
 #   ARTHUB_NETZ_INTERN   Subnetz zwischen Hub und Datenbank (Vorgabe 10.250.250.0/28)
 #   ARTHUB_NETZ          Subnetz des Netzes «arthub» für die Apps (Vorgabe 10.250.250.16/28)
@@ -10,7 +12,9 @@
 # die Standard-Adresspools von Docker aufgebraucht sind. Sie dürfen sich nicht
 # mit dem LAN, einem VPN oder anderen Docker-Netzen überschneiden.
 #
-# Der Hub ist bewusst NICHT öffentlich erreichbar: kein «ports:».
+# Die Lese-API (8110) ist bewusst NICHT veröffentlicht, nur im Docker-Netz.
+# Veröffentlicht wird nur die Verwaltungsoberfläche (8111) – am besten über den
+# Reverse-Proxy (NPM) mit HTTPS und nur im internen Netz.
 # Der Stack legt das Docker-Netz «arthub» selbst an. Die Apps (smerp, smshop)
 # hängen sich in ihrem Stack als externes Netz daran und erreichen den Hub
 # unter http://sm-arthub:8110:
@@ -25,6 +29,10 @@ services:
     environment:
       DATABASE_URL: postgres://arthub:${ARTHUB_DB_PASSWORT}@db:5432/arthub?sslmode=disable
       PORT: "8110"
+      ADMIN_PORT: "8111"
+      ARTHUB_ADMIN_PASSWORT: ${ARTHUB_ADMIN_PASSWORT}
+    ports:
+      - "${ARTHUB_ADMIN_PORT:-8111}:8111"
     depends_on:
       - db
     networks:

@@ -1,0 +1,152 @@
+:root {
+  --grund: #f5f6f4;
+  --flaeche: #ffffff;
+  --text: #1d2420;
+  --leise: #5d6862;
+  --linie: #dde2dd;
+  --akzent: #1f6b52;
+  --akzent-text: #ffffff;
+  --gefahr: #a33a2b;
+  --gut: #1f6b52;
+  --code: #eef1ee;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --grund: #141816;
+    --flaeche: #1c211e;
+    --text: #e6ebe7;
+    --leise: #9aa59f;
+    --linie: #2f3632;
+    --akzent: #4fb38f;
+    --akzent-text: #0d1310;
+    --gefahr: #e0806f;
+    --gut: #4fb38f;
+    --code: #252b27;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--grund);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.kopf {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--linie);
+  background: var(--flaeche);
+}
+.marke { font-weight: 650; letter-spacing: 0.01em; }
+.marke span { font-weight: 400; color: var(--leise); margin-left: 8px; }
+main { max-width: 920px; margin: 32px auto; padding: 0 16px; }
+
+.karte {
+  background: var(--flaeche);
+  border: 1px solid var(--linie);
+  border-radius: 10px;
+  padding: 24px;
+}
+.karte.schmal { max-width: 380px; margin: 48px auto; }
+h1, h2 { margin: 0 0 12px; font-size: 1.15rem; }
+.hinweis { color: var(--leise); margin: 0 0 16px; }
+
+label { display: block; font-size: 0.85rem; color: var(--leise); margin-bottom: 4px; }
+.unsichtbar { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+input {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--linie);
+  border-radius: 6px;
+  background: var(--grund);
+  color: var(--text);
+}
+input:focus { outline: 2px solid var(--akzent); outline-offset: 1px; }
+form > .knopf { margin-top: 16px; }
+
+.knopf {
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--akzent);
+  background: var(--akzent);
+  color: var(--akzent-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.knopf:disabled { opacity: 0.6; cursor: default; }
+.knopf.leise { background: transparent; color: var(--akzent); border-color: var(--linie); }
+.knopf.leise.gefahr { color: var(--gefahr); }
+.knopf:hover:not(:disabled) { filter: brightness(1.08); }
+
+.zeile { display: flex; gap: 8px; align-items: center; }
+.zeile input { flex: 1; }
+
+.meldung { margin: 10px 0 0; }
+.meldung.fehler { color: var(--gefahr); }
+
+.ergebnis {
+  margin: 16px 0;
+  padding: 16px;
+  border: 2px solid var(--akzent);
+  border-radius: 8px;
+}
+.ergebnis p { margin: 0 0 10px; }
+.ergebnis code {
+  flex: 1;
+  padding: 8px 10px;
+  background: var(--code);
+  border-radius: 6px;
+  font: 13px/1.4 ui-monospace, "SF Mono", Consolas, monospace;
+  word-break: break-all;
+  user-select: all;
+}
+.ergebnis > .knopf { margin-top: 12px; }
+
+.kennzahlen {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.kennzahlen div {
+  background: var(--flaeche);
+  border: 1px solid var(--linie);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+.kennzahlen span { display: block; font-size: 1.3rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.kennzahlen small { color: var(--leise); }
+
+.liste { width: 100%; border-collapse: collapse; margin-top: 20px; }
+.liste th {
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--leise);
+  border-bottom: 1px solid var(--linie);
+  padding: 6px 8px;
+}
+.liste td { padding: 10px 8px; border-bottom: 1px solid var(--linie); }
+.liste td.name { font-weight: 600; }
+.liste td.aktionen { text-align: right; white-space: nowrap; }
+.liste td.aktionen .knopf { padding: 4px 10px; font-size: 0.85rem; }
+.status { font-size: 0.85rem; }
+.status.aktiv { color: var(--gut); }
+.status.gesperrt { color: var(--gefahr); }
+
+@media (max-width: 640px) {
+  .kopf { padding: 12px 16px; }
+  .kennzahlen { grid-template-columns: repeat(2, 1fr); }
+  .zeile { flex-direction: column; align-items: stretch; }
+  .liste thead { display: none; }
+  .liste tr { display: grid; grid-template-columns: 1fr auto; padding: 8px 0; border-bottom: 1px solid var(--linie); }
+  .liste td { border: 0; padding: 2px 0; }
+  .liste td.erstellt, .liste td.zuletzt { color: var(--leise); font-size: 0.85rem; }
+  .liste td.aktionen { grid-column: 1 / -1; text-align: left; padding-top: 6px; }
+}

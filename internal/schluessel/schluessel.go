@@ -26,10 +26,10 @@ var ErrUngueltig = errors.New("api-schlüssel ungültig")
 
 // Eintrag für die Liste.
 type Eintrag struct {
-	Name     string
-	Aktiv    bool
-	Erstellt time.Time
-	Zuletzt  *time.Time
+	Name     string     `json:"name"`
+	Aktiv    bool       `json:"aktiv"`
+	Erstellt time.Time  `json:"erstellt"`
+	Zuletzt  *time.Time `json:"zuletzt"`
 }
 
 // Verwaltung arbeitet auf der Tabelle api_schluessel.

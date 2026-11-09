@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="de-CH">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sm-arthub Verwaltung</title>
+<link rel="stylesheet" href="verwaltung.css">
+<script src="verwaltung.js" defer></script>
+</head>
+<body>
+<header class="kopf">
+  <div class="marke">sm-arthub <span>Artikelkatalog-Hub</span></div>
+  <button type="button" id="abmelden" class="knopf leise" hidden>Abmelden</button>
+</header>
+
+<main>
+  <section id="anmeldung" class="karte schmal" hidden>
+    <h1>Anmelden</h1>
+    <form id="anmelde-form">
+      <label for="passwort">Verwaltungspasswort</label>
+      <input id="passwort" name="passwort" type="password" autocomplete="current-password" required autofocus>
+      <p id="anmelde-fehler" class="meldung fehler" hidden></p>
+      <button type="submit" class="knopf">Anmelden</button>
+    </form>
+  </section>
+
+  <div id="inhalt" hidden>
+    <section class="kennzahlen" aria-label="Stand des Katalogs">
+      <div><span id="st-artikel">–</span><small>Artikel</small></div>
+      <div><span id="st-angebote">–</span><small>Angebote</small></div>
+      <div><span id="st-lieferanten">–</span><small>Lieferanten</small></div>
+      <div><span id="st-version">–</span><small>Version</small></div>
+    </section>
+
+    <section class="karte">
+      <h2>API-Schlüssel der Applikationen</h2>
+      <p class="hinweis">Jede Applikation, die den Katalog liest, bekommt einen eigenen Schlüssel.
+        Er wird nur einmal angezeigt und gehört danach in die serverseitige Konfiguration der Applikation.</p>
+
+      <form id="neu-form" class="zeile">
+        <label for="neu-name" class="unsichtbar">Name der Applikation</label>
+        <input id="neu-name" name="name" placeholder="Name der Applikation, z.B. smerp"
+               pattern="[a-z0-9][a-z0-9\-]{0,39}" maxlength="40" autocomplete="off" required>
+        <button type="submit" class="knopf">Schlüssel erzeugen</button>
+      </form>
+      <p id="neu-fehler" class="meldung fehler" hidden></p>
+
+      <div id="ergebnis" class="ergebnis" hidden>
+        <p><strong>Neuer Schlüssel für <span id="erg-name"></span></strong> – nur jetzt sichtbar.
+          Kopieren Sie ihn in die Konfiguration der Applikation.</p>
+        <div class="zeile">
+          <code id="erg-schluessel"></code>
+          <button type="button" id="kopieren" class="knopf">Kopieren</button>
+        </div>
+        <button type="button" id="ergebnis-schliessen" class="knopf leise">Fertig, ausblenden</button>
+      </div>
+
+      <table class="liste">
+        <thead><tr><th>Applikation</th><th>Status</th><th>Erstellt</th><th>Zuletzt benutzt</th><th></th></tr></thead>
+        <tbody id="schluessel-liste"></tbody>
+      </table>
+      <p id="leer-hinweis" class="hinweis" hidden>Noch keine Schlüssel angelegt.</p>
+    </section>
+  </div>
+</main>
+
+<template id="tpl-zeile">
+  <tr>
+    <td class="name"></td>
+    <td><span class="status"></span></td>
+    <td class="erstellt"></td>
+    <td class="zuletzt"></td>
+    <td class="aktionen">
+      <button type="button" class="knopf leise ersetzen">Neu erzeugen</button>
+      <button type="button" class="knopf leise gefahr sperren">Sperren</button>
+    </td>
+  </tr>
+</template>
+</body>
+</html>
